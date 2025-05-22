@@ -1,0 +1,35 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/cors": "^11.0.1",
+    "@react-email/components": "^0.0.41",
+    "@react-email/render": "^1.1.2",
+    "@supabase/supabase-js": "^2.49.4",
+    "dotenv": "^16.5.0",
+    "fastify": "^5.3.3",
+    "googleapis": "^148.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "luxon": "^3.6.1",
+    "node-cron": "^4.0.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "resend": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/luxon": "^3.6.2",
+    "@types/node": "^22.15.17",
+    "@types/react": "^19.1.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
