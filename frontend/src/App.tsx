@@ -22,6 +22,7 @@ import Login from '@/pages/Login';
 import { useAuth } from '@/hooks/useAuth';
 import { SidebarProfile } from '@/components/SidebarProfile';
 import ConfirmEmail from '@/pages/ConfirmEmail';
+import TopSenders from '@/pages/TopSenders';
 import './App.css';
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -54,6 +55,16 @@ function Layout({ children }: { children: React.ReactNode }) {
             >
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
+            </Link>
+            <Link 
+              to="/top-senders"
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors",
+                location.pathname === "/top-senders" && "bg-accent text-accent-foreground"
+              )}
+            >
+              <MailIcon className="h-4 w-4" />
+              Top Senders
             </Link>
             <Link 
               to="/settings/profile"
@@ -118,6 +129,7 @@ function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+          <Route path="/top-senders" element={<PrivateRoute><TopSenders /></PrivateRoute>} />
           <Route path="/create-account" element={<CreateAccount />} />
           <Route path="/login" element={<Login />} />
           <Route path="/confirm-email" element={<ConfirmEmail />} />

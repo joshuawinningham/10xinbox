@@ -734,6 +734,104 @@ fastify.post('/api/gmail/disconnect', async (request, reply) => {
   }
 });
 
+// Endpoint to get top senders for a user in a date range
+fastify.post('/api/gmail/top-senders', async (request, reply) => {
+  const { user_id, time_zone, start_date, end_date, limit } = request.body as {
+    user_id?: string;
+    time_zone?: string;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+  };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Get user's time zone from param or gmail_tokens
+    let tz = time_zone;
+    if (!tz) {
+      const { data: tokenRow } = await supabase
+        .from('gmail_tokens')
+        .select('time_zone')
+        .eq('user_id', user_id)
+        .single();
+      tz = tokenRow?.time_zone || 'UTC';
+    }
+    // 4. Get date range
+    let start, end;
+    if (start_date && end_date) {
+      start = DateTime.fromISO(start_date, { zone: tz }).startOf('day');
+      end = DateTime.fromISO(end_date, { zone: tz }).endOf('day');
+    } else {
+      // Default: last 30 days
+      end = DateTime.now().setZone(tz).endOf('day');
+      start = end.minus({ days: 29 }).startOf('day');
+    }
+    const after = Math.floor(start.toUTC().toSeconds());
+    const before = Math.floor(end.toUTC().toSeconds());
+    // 5. Fetch all received messages in the date range (INBOX, not from me)
+    async function fetchAllMessages(q: string) {
+      let messages: any[] = [];
+      let nextPageToken: string | undefined = undefined;
+      do {
+        const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+          userId: 'me',
+          q,
+          pageToken: nextPageToken,
+          maxResults: 500,
+        });
+        if (res.data.messages) messages = messages.concat(res.data.messages);
+        nextPageToken = res.data.nextPageToken ?? undefined;
+      } while (nextPageToken);
+      return messages;
+    }
+    const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
+    // 6. Fetch sender info for each message (batch, limit concurrency)
+    const senderCounts: Record<string, { name: string; count: number }> = {};
+    const batchSize = 20;
+    for (let i = 0; i < receivedMessages.length; i += batchSize) {
+      const batch = receivedMessages.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(async (msg) => {
+          const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
+          const headers = res.data.payload?.headers || [];
+          const fromHeader = headers.find((h) => h.name?.toLowerCase() === 'from');
+          if (fromHeader && fromHeader.value) {
+            // Parse name and email from the From header
+            const match = fromHeader.value.match(/^(.*?)(?:\s*<(.+?)>)?$/);
+            let name = '', email = '';
+            if (match) {
+              name = match[1]?.replace(/"/g, '').trim();
+              email = match[2] || match[1];
+              if (!email.includes('@')) email = '';
+            }
+            if (email) {
+              if (!senderCounts[email]) senderCounts[email] = { name, count: 0 };
+              senderCounts[email].count++;
+              if (name && !senderCounts[email].name) senderCounts[email].name = name;
+            }
+          }
+        })
+      );
+    }
+    // 7. Sort and return top N senders
+    const top = Object.entries(senderCounts)
+      .map(([email, { name, count }]) => ({ email, name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit || 10);
+    return reply.send(top);
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to fetch top senders' });
+  }
+});
+
 const start = async () => {
   try {
     await fastify.listen({ port: Number(process.env.PORT) || 3001, host: '0.0.0.0' });
