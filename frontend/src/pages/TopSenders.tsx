@@ -4,6 +4,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/hooks/useAuth';
 import { DateTime } from 'luxon';
+import PageHeading from '@/components/PageHeading';
 
 type TopSender = {
   email: string;
@@ -55,7 +56,7 @@ export default function TopSenders() {
 
   return (
     <>
-      <h1 className="text-4xl font-bold tracking-tight mb-8">Top Senders</h1>
+      <PageHeading>Top Senders</PageHeading>
       <div className="mx-auto max-w-screen-2xl">
         <Card className="mb-8 hover:shadow-lg transition-shadow w-full">
           <CardHeader>

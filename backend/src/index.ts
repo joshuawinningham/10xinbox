@@ -29,7 +29,7 @@ const oauth2Client = new google.auth.OAuth2(
 );
 
 const SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/userinfo.email',
   'openid',
   'email',
@@ -42,6 +42,18 @@ const supabase = createClient(
 );
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Place this at the top of your file, before any usage
+function formatDuration(seconds: number | null): string {
+  if (seconds == null) return '--';
+  if (seconds < 60) return `${seconds}s`;
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  if (min < 60) return `${min}m${sec > 0 ? ` ${sec}s` : ''}`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return `${hr}h${remMin > 0 ? ` ${remMin}m` : ''}${sec > 0 ? ` ${sec}s` : ''}`;
+}
 
 fastify.get('/health', async (request, reply) => {
   return { status: 'ok' };
@@ -71,9 +83,10 @@ fastify.get('/api/auth/google/callback', async (request, reply) => {
   try {
     const { tokens } = await oauth2Client.getToken(code);
 
-    // Decode the id_token to get the user's email (optional, for logging)
+    // Decode the id_token to get the user's email and name
     const decoded: any = jwt.decode(tokens.id_token as string);
     const email = decoded?.email;
+    const name = decoded?.name || decoded?.given_name || '';
 
     // Store tokens in Supabase using the user_id (UUID) from state
     const { error } = await supabase
@@ -81,6 +94,7 @@ fastify.get('/api/auth/google/callback', async (request, reply) => {
       .upsert({
         user_id: state,
         email,
+        name, // Store the name
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         expires_at: new Date(Date.now() + (tokens.expiry_date ? tokens.expiry_date - Date.now() : 0)).toISOString(),
@@ -222,6 +236,13 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     return reply.send({ success: true, emails_sent, emails_received });
   } catch (err: any) {
     fastify.log.error(err);
+    // Check for insufficient permissions error from Google
+    if (err && err.errors && Array.isArray(err.errors)) {
+      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
+      if (insufficient) {
+        return reply.status(403).send({ error: 'insufficient_permissions' });
+      }
+    }
     return reply.status(500).send({ error: err.message || 'Failed to fetch/store email stats' });
   }
 });
@@ -265,11 +286,11 @@ cron.schedule('0 * * * *', async () => {
     for (const user of users) {
       try {
         const tz = user.time_zone || 'UTC';
-        const userNow = utcNow.setZone(tz);
+        const now2 = utcNow.setZone(tz);
         // Only send if it's midnight in user's time zone
-        if (userNow.hour === 0 && userNow.minute === 0) {
+        if (now2.hour === 0 && now2.minute === 0) {
           // Get previous day's date in user's time zone
-          const dateStr = userNow.minus({ days: 1 }).startOf('day').toISODate();
+          const dateStr = now2.minus({ days: 1 }).startOf('day').toISODate();
 
           // Check if report already sent for this user/date
           const { data: sentRow, error: sentError } = await supabase
@@ -313,8 +334,8 @@ cron.schedule('0 * * * *', async () => {
             // 3. Get user's time zone from param or gmail_tokens
             const tz = user.time_zone || 'UTC';
             // 4. Get date range for today in user's time zone
-            const now = DateTime.now().setZone(tz);
-            const start = now.startOf('day');
+            const now3 = DateTime.now().setZone(tz);
+            const start = now3.startOf('day');
             const end = start.plus({ days: 1 });
             const after = Math.floor(start.toUTC().toSeconds());
             const before = Math.floor(end.toUTC().toSeconds());
@@ -369,12 +390,60 @@ cron.schedule('0 * * * *', async () => {
           } catch (err) {
             fastify.log.error('Failed to fetch hourly stats for email report:', err);
           }
+          // Fetch inbox zero history for the current month
+          const inboxZeroRes = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: user.user_id, time_zone: tz }),
+          });
+          const inboxZeroHistory = await inboxZeroRes.json();
+
+          // Calculate Inbox Zero Business Days
+          const now4 = DateTime.now().setZone(tz);
+          const currentYear = now4.year;
+          const currentMonth = now4.month - 1; // JS Date months are 0-based
+          const businessDays = inboxZeroHistory.filter((d: any) => {
+            const date = new Date(d.date);
+            return (
+              date.getFullYear() === currentYear &&
+              date.getMonth() === currentMonth &&
+              date.getDay() !== 0 && // not Sunday
+              date.getDay() !== 6    // not Saturday
+            );
+          });
+          const inboxZeroBusinessDays = businessDays.filter((d: any) => d.inboxCount === 0).length;
+
+          // Calculate Consecutive Inbox Zero Business Days
+          let streak = 0;
+          for (let i = businessDays.length - 1; i >= 0; i--) {
+            if (businessDays[i].inboxCount === 0) {
+              streak++;
+            } else {
+              break;
+            }
+          }
+          const consecutiveInboxZeroDays = streak;
+
+          // Calculate Avg. Response Time (for today)
+          const responseRes = await fetch('http://localhost:3001/api/gmail/response-time', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: user.user_id, time_zone: tz, day: 'today' }),
+          });
+          const responseData = await responseRes.json();
+          const avgResponseTime = responseData.average_response_time != null
+            ? formatDuration(responseData.average_response_time)
+            : '--';
+
           // Generate simple HTML report using React Email (no JSX)
           const html = await render(
             React.createElement(DailyReportEmail, {
               date: dateStr || '',
               emailsSent: stats.emails_sent,
               emailsReceived: stats.emails_received,
+              avgResponseTime,
+              inboxZeroBusinessDays,
+              consecutiveInboxZeroDays,
               hourlySent,
               hourlyReceived,
             })
@@ -419,8 +488,8 @@ fastify.post('/api/report/send', async (request, reply) => {
     const tz = user.time_zone || 'UTC';
 
     // Get today's date in user's local time zone
-    const now = DateTime.now().setZone(tz);
-    const dateStr = now.startOf('day').toISODate();
+    const nowManual = DateTime.now().setZone(tz);
+    const dateStr = nowManual.startOf('day').toISODate();
 
     // Try to fetch today's stats
     let { data: stats, error: statsError } = await supabase
@@ -466,8 +535,8 @@ fastify.post('/api/report/send', async (request, reply) => {
       // 3. Get user's time zone from param or gmail_tokens
       const tz = user.time_zone || 'UTC';
       // 4. Get date range for today in user's time zone
-      const now = DateTime.now().setZone(tz);
-      const start = now.startOf('day');
+      const nowManual = DateTime.now().setZone(tz);
+      const start = nowManual.startOf('day');
       const end = start.plus({ days: 1 });
       const after = Math.floor(start.toUTC().toSeconds());
       const before = Math.floor(end.toUTC().toSeconds());
@@ -523,12 +592,60 @@ fastify.post('/api/report/send', async (request, reply) => {
       fastify.log.error('Failed to fetch hourly stats for email report:', err);
     }
 
+    // Fetch inbox zero history for the current month
+    const inboxZeroRes = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id, time_zone: tz }),
+    });
+    const inboxZeroHistory = await inboxZeroRes.json();
+
+    // Calculate Inbox Zero Business Days
+    const nowBusiness = DateTime.now().setZone(tz);
+    const currentYear = nowBusiness.year;
+    const currentMonth = nowBusiness.month - 1; // JS Date months are 0-based
+    const businessDays = inboxZeroHistory.filter((d: any) => {
+      const date = new Date(d.date);
+      return (
+        date.getFullYear() === currentYear &&
+        date.getMonth() === currentMonth &&
+        date.getDay() !== 0 && // not Sunday
+        date.getDay() !== 6    // not Saturday
+      );
+    });
+    const inboxZeroBusinessDays = businessDays.filter((d: any) => d.inboxCount === 0).length;
+
+    // Calculate Consecutive Inbox Zero Business Days
+    let streak = 0;
+    for (let i = businessDays.length - 1; i >= 0; i--) {
+      if (businessDays[i].inboxCount === 0) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    const consecutiveInboxZeroDays = streak;
+
+    // Calculate Avg. Response Time (for today)
+    const responseRes = await fetch('http://localhost:3001/api/gmail/response-time', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id, time_zone: tz, day: 'today' }),
+    });
+    const responseData = await responseRes.json();
+    const avgResponseTime = responseData.average_response_time != null
+      ? formatDuration(responseData.average_response_time)
+      : '--';
+
     // Render the report email
     const html = await render(
       React.createElement(DailyReportEmail, {
         date: dateStr || '',
         emailsSent: stats.emails_sent,
         emailsReceived: stats.emails_received,
+        avgResponseTime,
+        inboxZeroBusinessDays,
+        consecutiveInboxZeroDays,
         hourlySent,
         hourlyReceived,
       })
@@ -686,6 +803,13 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
     return reply.send({ sent: sentByHour, received: receivedByHour });
   } catch (err: any) {
     fastify.log.error(err);
+    // Check for insufficient permissions error from Google
+    if (err && err.errors && Array.isArray(err.errors)) {
+      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
+      if (insufficient) {
+        return reply.status(403).send({ error: 'insufficient_permissions' });
+      }
+    }
     return reply.status(500).send({ error: err.message || 'Failed to fetch hourly stats' });
   }
 });
@@ -699,13 +823,30 @@ fastify.post('/api/gmail/is-connected', async (request, reply) => {
   try {
     const { data, error } = await supabase
       .from('gmail_tokens')
-      .select('user_id')
+      .select('*')
       .eq('user_id', user_id)
       .single();
+
     if (error && error.code !== 'PGRST116') { // PGRST116: No rows found
       return reply.status(500).send({ error: error.message });
     }
-    return reply.send({ connected: !!data });
+    if (!data) {
+      return reply.send({ connected: false });
+    }
+
+    // Try to get a valid access token
+    try {
+      await getValidAccessToken(user_id); // This will throw if token is invalid
+      return reply.send({ connected: true });
+    } catch (err) {
+      // Instead of deleting the row, clear only the token fields
+      await supabase.from('gmail_tokens').update({
+        access_token: null,
+        refresh_token: null,
+        expires_at: null
+      }).eq('user_id', user_id);
+      return reply.send({ connected: false });
+    }
   } catch (err: any) {
     fastify.log.error(err);
     return reply.status(500).send({ error: err.message || 'Failed to check Gmail connection' });
@@ -828,7 +969,356 @@ fastify.post('/api/gmail/top-senders', async (request, reply) => {
     return reply.send(top);
   } catch (err: any) {
     fastify.log.error(err);
+    // Check for insufficient permissions error from Google
+    if (err && err.errors && Array.isArray(err.errors)) {
+      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
+      if (insufficient) {
+        return reply.status(403).send({ error: 'insufficient_permissions' });
+      }
+    }
     return reply.status(500).send({ error: err.message || 'Failed to fetch top senders' });
+  }
+});
+
+// Endpoint to get average response time for today (or a given day)
+fastify.post('/api/gmail/response-time', async (request, reply) => {
+  const { user_id, time_zone, day } = request.body as { user_id?: string, time_zone?: string, day?: string };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Get user's time zone from param or gmail_tokens
+    let tz = time_zone;
+    if (!tz) {
+      const { data: tokenRow } = await supabase
+        .from('gmail_tokens')
+        .select('time_zone')
+        .eq('user_id', user_id)
+        .single();
+      tz = tokenRow?.time_zone || 'UTC';
+    }
+    // 4. Get date range in user's time zone
+    const now = DateTime.now().setZone(tz);
+    let start, end;
+    if (day === 'today' || !day) {
+      start = now.startOf('day');
+    } else {
+      start = now.minus({ days: 1 }).startOf('day');
+    }
+    end = start.plus({ days: 1 });
+    const after = Math.floor(start.toUTC().toSeconds());
+    const before = Math.floor(end.toUTC().toSeconds());
+    // 5. Fetch all received emails for today (Inbox, not sent by me)
+    async function fetchAllMessages(q: string) {
+      let messages: any[] = [];
+      let nextPageToken: string | undefined = undefined;
+      do {
+        const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+          userId: 'me',
+          q,
+          pageToken: nextPageToken,
+          maxResults: 500,
+        });
+        if (res.data.messages) messages = messages.concat(res.data.messages);
+        nextPageToken = res.data.nextPageToken ?? undefined;
+      } while (nextPageToken);
+      return messages;
+    }
+    const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
+    if (receivedMessages.length === 0) {
+      return reply.send({ average_response_time: null, count: 0 });
+    }
+    // 6. For each received message, find the first reply sent by the user in the same thread
+    let totalResponseTime = 0;
+    let responseCount = 0;
+    const batchSize = 10;
+    for (let i = 0; i < receivedMessages.length; i += batchSize) {
+      const batch = receivedMessages.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(async (msg) => {
+          // Get received message details
+          const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
+          const receivedInternalDate = Number(res.data.internalDate);
+          const threadId = res.data.threadId;
+          if (!threadId) return null;
+          // Fetch all messages in the thread
+          const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
+          const threadMessages = threadRes.data.messages || [];
+          // Find the first reply sent by the user after the received message
+          const reply = threadMessages.find((m) => {
+            if (m.id === msg.id) return false; // skip the received message itself
+            if (m.labelIds && m.labelIds.includes('SENT')) {
+              const sentDate = Number(m.internalDate);
+              return sentDate > receivedInternalDate;
+            }
+            return false;
+          });
+          if (reply) {
+            const replyDate = Number(reply.internalDate);
+            const responseTime = replyDate - receivedInternalDate;
+            totalResponseTime += responseTime;
+            responseCount++;
+          }
+          return null;
+        })
+      );
+    }
+    if (responseCount === 0) {
+      return reply.send({ average_response_time: null, count: 0 });
+    }
+    // Average in seconds
+    const avgSeconds = Math.round(totalResponseTime / responseCount / 1000);
+    return reply.send({ average_response_time: avgSeconds, count: responseCount });
+  } catch (err: any) {
+    fastify.log.error(err);
+    // Check for insufficient permissions error from Google
+    if (err && err.errors && Array.isArray(err.errors)) {
+      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
+      if (insufficient) {
+        return reply.status(403).send({ error: 'insufficient_permissions' });
+      }
+    }
+    return reply.status(500).send({ error: err.message || 'Failed to calculate response time' });
+  }
+});
+
+// Endpoint to get inbox count at the end of each day for the last N days
+fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
+  const { user_id, time_zone, days } = request.body as { user_id?: string, time_zone?: string, days?: number };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Get user's time zone from param or gmail_tokens
+    let tz = time_zone;
+    if (!tz) {
+      const { data: tokenRow } = await supabase
+        .from('gmail_tokens')
+        .select('time_zone')
+        .eq('user_id', user_id)
+        .single();
+      tz = tokenRow?.time_zone || 'UTC';
+    }
+    // 4. For each day, get inbox count at end of day
+    const numDays = days && days > 0 && days <= 90 ? days : 30;
+    const now = DateTime.now().setZone(tz);
+    const results: { date: string, inboxCount: number }[] = [];
+    for (let i = 0; i < numDays; i++) {
+      const day = now.minus({ days: i });
+      const endOfDay = day.endOf('day');
+      const before = Math.floor(endOfDay.toUTC().toSeconds());
+      // Count messages in INBOX before end of day
+      const res = await gmail.users.messages.list({
+        userId: 'me',
+        q: `label:INBOX before:${before}`,
+      });
+      const inboxCount = res.data.resultSizeEstimate || 0;
+      results.push({ date: day.toISODate() ?? '', inboxCount });
+    }
+    // Return in ascending order (oldest first)
+    return reply.send(results.reverse());
+  } catch (err: any) {
+    fastify.log.error(err);
+    // Check for insufficient permissions error from Google
+    if (err && err.errors && Array.isArray(err.errors)) {
+      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
+      if (insufficient) {
+        return reply.status(403).send({ error: 'insufficient_permissions' });
+      }
+    }
+    return reply.status(500).send({ error: err.message || 'Failed to fetch inbox zero history' });
+  }
+});
+
+// Endpoint to fetch a list of Gmail messages for a user (optionally filtered by label)
+fastify.get('/api/gmail/messages', async (request, reply) => {
+  const { user_id, label = 'INBOX', maxResults = 20, q } = request.query as { user_id?: string, label?: string, maxResults?: string, q?: string };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Fetch message list
+    const res = await gmail.users.messages.list({
+      userId: 'me',
+      labelIds: [label],
+      maxResults: Number(maxResults),
+      q: q || undefined,
+    });
+    const messages = res.data.messages || [];
+    // 4. Fetch metadata for each message
+    const batch = await Promise.all(
+      messages.map(async (msg) => {
+        const msgRes = await gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id!,
+          format: 'metadata',
+          metadataHeaders: ['From', 'Subject', 'Date'],
+        });
+        const headers = msgRes.data.payload?.headers || [];
+        const getHeader = (name: string) => headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+        return {
+          id: msg.id,
+          threadId: msgRes.data.threadId,
+          sender: getHeader('From'),
+          subject: getHeader('Subject'),
+          date: getHeader('Date'),
+          snippet: msgRes.data.snippet || '',
+          labelIds: msgRes.data.labelIds || [],
+        };
+      })
+    );
+    return reply.send({ emails: batch });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to fetch messages' });
+  }
+});
+
+// Endpoint to fetch the full body of a Gmail message for a user
+fastify.get('/api/gmail/message', async (request, reply) => {
+  const { user_id, message_id } = request.query as { user_id?: string, message_id?: string };
+  if (!user_id || !message_id) {
+    return reply.status(400).send({ error: 'Missing user_id or message_id' });
+  }
+  try {
+    const accessToken = await getValidAccessToken(user_id);
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const msgRes = await gmail.users.messages.get({
+      userId: 'me',
+      id: message_id,
+      format: 'full',
+    });
+
+    // Helper to decode base64url
+    function decodeBody(body: string) {
+      return Buffer.from(body, 'base64').toString('utf-8');
+    }
+
+    // Find the plain text or HTML part
+    let body = '';
+    const payload = msgRes.data.payload;
+    if (payload?.parts) {
+      const part = payload.parts.find(p => p.mimeType === 'text/html') || payload.parts.find(p => p.mimeType === 'text/plain');
+      if (part?.body?.data) {
+        body = decodeBody(part.body.data);
+      }
+    } else if (payload?.body?.data) {
+      body = decodeBody(payload.body.data);
+    }
+
+    return reply.send({ body });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to fetch message body' });
+  }
+});
+
+// Endpoint to mark a Gmail message as read (remove UNREAD label)
+fastify.post('/api/gmail/mark-read', async (request, reply) => {
+  const { user_id, message_id } = request.body as { user_id?: string, message_id?: string };
+  if (!user_id || !message_id) {
+    return reply.status(400).send({ error: 'Missing user_id or message_id' });
+  }
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Modify the message to remove the UNREAD label
+    await gmail.users.messages.modify({
+      userId: 'me',
+      id: message_id,
+      requestBody: {
+        removeLabelIds: ['UNREAD'],
+      },
+    });
+    return reply.send({ success: true });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to mark message as read' });
+  }
+});
+
+// Endpoint to send an email via Gmail API
+fastify.post('/api/gmail/send', async (request, reply) => {
+  const { user_id, to, subject, body } = request.body as {
+    user_id?: string;
+    to?: string;
+    subject?: string;
+    body?: string;
+  };
+  if (!user_id || !to || !subject || !body) {
+    return reply.status(400).send({ error: 'Missing user_id, to, subject, or body' });
+  }
+  try {
+    // 1. Get tokens and user info from Supabase
+    const { data: userData, error: userError } = await supabase
+      .from('gmail_tokens')
+      .select('email, name, access_token, refresh_token, expires_at')
+      .eq('user_id', user_id)
+      .single();
+
+    if (userError || !userData) throw new Error('No tokens found for user');
+
+    const { email: userEmail, name: userName, access_token, refresh_token, expires_at } = userData;
+
+    // 2. Get a valid access token (refresh if needed)
+    const accessToken = await getValidAccessToken(user_id);
+    // 3. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // 4. Create raw email message (RFC 5322)
+    const messageParts = [
+      `From: ${userName ? `${userName} <${userEmail}>` : userEmail}`,
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      body,
+    ];
+    const message = messageParts.join('\r\n');
+    const encodedMessage = Buffer.from(message)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    // 5. Send the email
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage,
+      },
+    });
+    return reply.send({ success: true });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to send email' });
   }
 });
 

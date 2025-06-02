@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { MailIcon, SendIcon, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { MailIcon, SendIcon, FileText, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,9 @@ import { AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis, Cartesia
 import { useTodayEmailStats } from '@/hooks/useTodayEmailStats';
 import { useSendReport } from '@/hooks/useSendReport';
 import { useEmailStats, EmailStatsView } from '@/hooks/useEmailStats';
+import { useAuth } from '@/hooks/useAuth';
+import { connectGmail } from '@/lib/gmail';
+import PageHeading from '@/components/PageHeading';
 
 const hourlyVolumeData = [
   { name: '1AM', received: 8, sent: 5 },
@@ -56,9 +59,137 @@ const yearlyVolumeData = [
 
 export default function Dashboard() {
   const [period, setPeriod] = useState<EmailStatsView>("hourly");
-  const { emailsSent, emailsReceived, loading, error } = useTodayEmailStats();
+  const { emailsSent, emailsReceived, emailsSentYesterday, emailsReceivedYesterday, loading, error } = useTodayEmailStats();
   const { sendReport, loading: sending, success, error: sendError } = useSendReport();
   const { data: statsData, loading: statsLoading, error: statsError } = useEmailStats(period);
+  const { user } = useAuth();
+  const [responseTime, setResponseTime] = useState<number | null>(null);
+  const [responseCount, setResponseCount] = useState<number>(0);
+  const [responseLoading, setResponseLoading] = useState(false);
+  const [responseError, setResponseError] = useState<string | null>(null);
+  const [inboxZeroDays, setInboxZeroDays] = useState<number | null>(null);
+  const [inboxZeroLoading, setInboxZeroLoading] = useState(false);
+  const [inboxZeroError, setInboxZeroError] = useState<string | null>(null);
+  const [consecutiveInboxZero, setConsecutiveInboxZero] = useState<number | null>(null);
+  const [showPermissionBanner, setShowPermissionBanner] = useState(true);
+
+  useEffect(() => {
+    const fetchResponseTime = async () => {
+      if (!user?.id) return;
+      setResponseLoading(true);
+      setResponseError(null);
+      try {
+        const res = await fetch('http://localhost:3001/api/gmail/response-time', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user.id }),
+        });
+        if (!res.ok) throw new Error('Failed to fetch response time');
+        const data = await res.json();
+        setResponseTime(data.average_response_time);
+        setResponseCount(data.count);
+      } catch (err) {
+        setResponseError((err as Error).message);
+      } finally {
+        setResponseLoading(false);
+      }
+    };
+    fetchResponseTime();
+  }, [user?.id]);
+
+  useEffect(() => {
+    const fetchInboxZero = async () => {
+      if (!user?.id) return;
+      setInboxZeroLoading(true);
+      setInboxZeroError(null);
+      try {
+        const res = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user.id }),
+        });
+        if (!res.ok) throw new Error('Failed to fetch inbox zero history');
+        const data = await res.json();
+        // Only count business days (Mon-Fri) in the current month where inboxCount === 0
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+        const daysThisMonth = Array.isArray(data)
+          ? data.filter((d: any) => {
+              const date = new Date(d.date);
+              return (
+                date.getFullYear() === currentYear &&
+                date.getMonth() === currentMonth &&
+                date.getDay() !== 0 && // not Sunday
+                date.getDay() !== 6    // not Saturday
+              );
+            })
+          : [];
+        const inboxZeroBusinessDays = daysThisMonth.filter((d: any) => d.inboxCount === 0).length;
+        setInboxZeroDays(inboxZeroBusinessDays);
+      } catch (err) {
+        setInboxZeroError((err as Error).message);
+      } finally {
+        setInboxZeroLoading(false);
+      }
+    };
+    fetchInboxZero();
+  }, [user?.id]);
+
+  useEffect(() => {
+    const fetchConsecutiveInboxZero = async () => {
+      if (!user?.id) return;
+      try {
+        const res = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user.id }),
+        });
+        if (!res.ok) throw new Error('Failed to fetch inbox zero history');
+        const data = await res.json();
+        // Only consider business days (Mon-Fri) in the current month
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+        // Sort by date ascending
+        const monthData = Array.isArray(data)
+          ? data.filter((d: any) => {
+              const date = new Date(d.date);
+              return (
+                date.getFullYear() === currentYear &&
+                date.getMonth() === currentMonth &&
+                date.getDay() !== 0 && // not Sunday
+                date.getDay() !== 6    // not Saturday
+              );
+            }).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
+          : [];
+        // Find the longest streak ending today (or yesterday if today is weekend)
+        let streak = 0;
+        for (let i = monthData.length - 1; i >= 0; i--) {
+          if (monthData[i].inboxCount === 0) {
+            streak++;
+          } else {
+            break;
+          }
+        }
+        setConsecutiveInboxZero(streak);
+      } catch (err) {
+        setConsecutiveInboxZero(null);
+      }
+    };
+    fetchConsecutiveInboxZero();
+  }, [user?.id]);
+
+  function formatDuration(seconds: number | null) {
+    if (seconds == null) return '--';
+    if (seconds < 60) return `${seconds}s`;
+    const min = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    if (min < 60) return `${min}m${sec > 0 ? ` ${sec}s` : ''}`;
+    const hr = Math.floor(min / 60);
+    const remMin = min % 60;
+    return `${hr}h${remMin > 0 ? ` ${remMin}m` : ''}${sec > 0 ? ` ${sec}s` : ''}`;
+  }
 
   // Helper to get recharts dataKey for x-axis
   const getXAxisKey = () => {
@@ -162,35 +293,103 @@ export default function Dashboard() {
 
   return (
     <>
-      <h1 className="text-4xl font-bold tracking-tight mb-8">Dashboard</h1>
+      <PageHeading>Dashboard</PageHeading>
+      {statsError === 'insufficient_permissions' && showPermissionBanner && (
+        <div className="flex items-center gap-4 bg-yellow-100 border border-yellow-300 text-yellow-900 px-4 py-3 rounded mb-6">
+          <AlertTriangle className="w-5 h-5 text-yellow-600" />
+          <span className="flex-1">
+            Your Gmail connection is missing required permissions. Please re-authorize to continue seeing your email stats.
+          </span>
+          <Button
+            variant="outline"
+            className="border-yellow-400 text-yellow-900 hover:bg-yellow-200"
+            onClick={() => user && connectGmail(user.id)}
+          >
+            Re-authorize Gmail
+          </Button>
+          <button
+            className="ml-2 text-yellow-700 hover:text-yellow-900 text-xl font-bold"
+            onClick={() => setShowPermissionBanner(false)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
       
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2 mb-8">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5 mb-8">
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-2xl font-bold">Emails Received Today</CardTitle>
-            <MailIcon className="h-6 w-6 text-muted-foreground" />
+            <CardTitle className="text-2xl font-bold">Emails Received<br />Today</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-primary">
               {loading ? '...' : error ? '--' : emailsReceived}
             </div>
             <p className="text-sm text-muted-foreground mt-2">
-              +12% from yesterday
+              {loading || error ? '--' :
+                emailsReceivedYesterday === 0 || emailsReceivedYesterday == null
+                  ? '+0% from yesterday'
+                  : `${emailsReceivedYesterday === 0 ? '+0' : ((emailsReceived - emailsReceivedYesterday) / emailsReceivedYesterday * 100 > 0 ? '+' : '')}${((emailsReceived - emailsReceivedYesterday) / (emailsReceivedYesterday || 1) * 100).toFixed(0)}% from yesterday`}
             </p>
           </CardContent>
         </Card>
 
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-2xl font-bold">Emails Sent Today</CardTitle>
-            <SendIcon className="h-6 w-6 text-muted-foreground" />
+            <CardTitle className="text-2xl font-bold">Emails Sent<br />Today</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-primary">
               {loading ? '...' : error ? '--' : emailsSent}
             </div>
             <p className="text-sm text-muted-foreground mt-2">
-              +8% from yesterday
+              {loading || error ? '--' :
+                emailsSentYesterday === 0 || emailsSentYesterday == null
+                  ? '+0% from yesterday'
+                  : `${emailsSentYesterday === 0 ? '+0' : ((emailsSent - emailsSentYesterday) / emailsSentYesterday * 100 > 0 ? '+' : '')}${((emailsSent - emailsSentYesterday) / (emailsSentYesterday || 1) * 100).toFixed(0)}% from yesterday`}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-2xl font-bold">Avg. Response<br />Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-primary">
+              {responseLoading ? '...' : responseError ? '--' : formatDuration(responseTime)}
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              {responseCount > 0 ? `${responseCount} replies today` : 'No replies today'}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-2xl font-bold">Inbox Zero Days<br />This Month</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-primary">
+              {inboxZeroLoading ? '...' : inboxZeroError ? '--' : inboxZeroDays}
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              {inboxZeroDays !== null ? `${inboxZeroDays} days with zero inbox` : ''}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-2xl font-bold">Consecutive<br />Inbox Zero Days</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-primary">
+              {consecutiveInboxZero === null ? '...' : consecutiveInboxZero}
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              {consecutiveInboxZero === 1 ? '1 day streak' : `${consecutiveInboxZero ?? 0} day streak`}
             </p>
           </CardContent>
         </Card>
@@ -224,7 +423,7 @@ export default function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader>
-            <CardTitle>Email Activity (Bar)</CardTitle>
+            <CardTitle>{period === 'yearly' ? 'Emails Received/Sent Last 12 Months (Bar)' : period === 'monthly' ? 'Emails Received/Sent This Month (Bar)' : period === 'daily' ? 'Emails Received/Sent This Week (Bar)' : 'Emails Received/Sent Today (Bar)'}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
@@ -246,7 +445,7 @@ export default function Dashboard() {
 
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader>
-            <CardTitle>Email Activity (Line)</CardTitle>
+            <CardTitle>{period === 'yearly' ? 'Emails Received/Sent Last 12 Months (Line)' : period === 'monthly' ? 'Emails Received/Sent This Month (Line)' : period === 'daily' ? 'Emails Received/Sent This Week (Line)' : 'Emails Received/Sent Today (Line)'}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
@@ -280,7 +479,7 @@ export default function Dashboard() {
 
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader>
-            <CardTitle>Email Activity (Area)</CardTitle>
+            <CardTitle>{period === 'yearly' ? 'Emails Received/Sent Last 12 Months (Area)' : period === 'monthly' ? 'Emails Received/Sent This Month (Area)' : period === 'daily' ? 'Emails Received/Sent This Week (Area)' : 'Emails Received/Sent Today (Area)'}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">

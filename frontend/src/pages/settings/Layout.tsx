@@ -1,14 +1,15 @@
 import React from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import PageHeading from '@/components/PageHeading';
 
 export default function SettingsLayout() {
   const location = useLocation();
 
   return (
     <div className="space-y-6">
+      <PageHeading>Settings</PageHeading>
       <div>
-        <h1 className="text-4xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-2">
           Manage your account settings and preferences.
         </p>

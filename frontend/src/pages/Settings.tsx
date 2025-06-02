@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import PageHeading from '@/components/PageHeading';
 
 const timezones = [
   "UTC",
@@ -35,7 +36,7 @@ const timezones = [
 export default function SettingsPage() {
   return (
     <>
-      <h1 className="text-4xl font-bold tracking-tight mb-8">Settings</h1>
+      <PageHeading>Settings</PageHeading>
       
       <div className="grid gap-6">
         <Card>

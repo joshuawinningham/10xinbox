@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, SendIcon, Settings, User, LogOut, MoreVertical } from 'lucide-react';
+import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, SendIcon, Settings, User, LogOut, MoreVertical, Calendar } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -23,7 +23,10 @@ import { useAuth } from '@/hooks/useAuth';
 import { SidebarProfile } from '@/components/SidebarProfile';
 import ConfirmEmail from '@/pages/ConfirmEmail';
 import TopSenders from '@/pages/TopSenders';
+import InboxZero from '@/pages/InboxZero';
+import Mail from '@/pages/Mail';
 import './App.css';
+import { applyTheme } from '@/lib/theme-utils';
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -49,31 +52,51 @@ function Layout({ children }: { children: React.ReactNode }) {
             <Link 
               to="/"
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors",
-                location.pathname === "/" && "bg-accent text-accent-foreground"
+                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent",
+                location.pathname === "/" && "bg-accent text-primary"
               )}
             >
-              <LayoutDashboard className="h-4 w-4" />
+              <LayoutDashboard className="h-5 w-5" />
               Dashboard
+            </Link>
+            <Link 
+              to="/mail"
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent",
+                location.pathname === "/mail" && "bg-accent text-primary"
+              )}
+            >
+              <MailIcon className="h-5 w-5" />
+              Mail
             </Link>
             <Link 
               to="/top-senders"
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors",
-                location.pathname === "/top-senders" && "bg-accent text-accent-foreground"
+                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent",
+                location.pathname === "/top-senders" && "bg-accent text-primary"
               )}
             >
-              <MailIcon className="h-4 w-4" />
+              <MailIcon className="h-5 w-5" />
               Top Senders
             </Link>
-            <Link 
-              to="/settings/profile"
+            <Link
+              to="/inbox-zero"
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors",
-                location.pathname.startsWith("/settings") && "bg-accent text-accent-foreground"
+                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent",
+                location.pathname === "/inbox-zero" && "bg-accent text-primary"
               )}
             >
-              <Settings className="h-4 w-4" />
+              <Calendar className="h-5 w-5" />
+              Inbox Zero
+            </Link>
+            <Link
+              to="/settings"
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent",
+                location.pathname === "/settings" && "bg-accent text-primary"
+              )}
+            >
+              <Settings className="h-5 w-5" />
               Settings
             </Link>
           </nav>
@@ -106,7 +129,7 @@ function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="p-8">
-          <div className="mx-auto max-w-7xl">
+          <div className="mx-auto max-w-screen-2xl">
             {children}
           </div>
         </div>
@@ -124,12 +147,19 @@ function PrivateRoute({ children }: { children: JSX.Element }) {
 }
 
 function App() {
+  useEffect(() => {
+    const theme = localStorage.getItem('theme') || 'blue';
+    applyTheme(theme);
+  }, []);
+
   return (
     <Router>
       <Layout>
         <Routes>
           <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+          <Route path="/mail" element={<PrivateRoute><Mail /></PrivateRoute>} />
           <Route path="/top-senders" element={<PrivateRoute><TopSenders /></PrivateRoute>} />
+          <Route path="/inbox-zero" element={<PrivateRoute><InboxZero /></PrivateRoute>} />
           <Route path="/create-account" element={<CreateAccount />} />
           <Route path="/login" element={<Login />} />
           <Route path="/confirm-email" element={<ConfirmEmail />} />

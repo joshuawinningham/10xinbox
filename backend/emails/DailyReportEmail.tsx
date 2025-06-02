@@ -22,11 +22,23 @@ type DailyReportEmailProps = {
   date: string;
   emailsSent: number;
   emailsReceived: number;
+  avgResponseTime: string | number;
+  inboxZeroBusinessDays: number;
+  consecutiveInboxZeroDays: number;
   hourlySent?: number[];
   hourlyReceived?: number[];
 };
 
-export default function DailyReportEmail({ date, emailsSent, emailsReceived, hourlySent, hourlyReceived }: DailyReportEmailProps) {
+export default function DailyReportEmail({
+  date,
+  emailsSent,
+  emailsReceived,
+  avgResponseTime,
+  inboxZeroBusinessDays,
+  consecutiveInboxZeroDays,
+  hourlySent,
+  hourlyReceived,
+}: DailyReportEmailProps) {
   return (
     <Html>
       <Head />
@@ -55,6 +67,32 @@ export default function DailyReportEmail({ date, emailsSent, emailsReceived, hou
                   <div style={{ background: "#2563eb", color: "#fff", borderRadius: 8, padding: "18px 0", fontSize: 18, fontWeight: 600, minWidth: 120, textAlign: "center" }}>
                     <div style={{ fontSize: 13, fontWeight: 400, opacity: 0.85, marginBottom: 4 }}>Emails Sent</div>
                     {emailsSent}
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </Section>
+
+          {/* New KPIs Section */}
+          <Section style={{ marginBottom: 32 }}>
+            <table width="100%" cellPadding={0} cellSpacing={0} style={{ borderSpacing: 0, borderCollapse: "collapse" }}>
+              <tr>
+                <td align="center" style={{ padding: 8 }}>
+                  <div style={{ background: "#f59e42", color: "#fff", borderRadius: 8, padding: "14px 0", fontSize: 16, fontWeight: 600, minWidth: 120, textAlign: "center" }}>
+                    <div style={{ fontSize: 13, fontWeight: 400, opacity: 0.85, marginBottom: 4 }}>Avg. Response Time</div>
+                    {avgResponseTime}
+                  </div>
+                </td>
+                <td align="center" style={{ padding: 8 }}>
+                  <div style={{ background: "#6366f1", color: "#fff", borderRadius: 8, padding: "14px 0", fontSize: 16, fontWeight: 600, minWidth: 120, textAlign: "center" }}>
+                    <div style={{ fontSize: 13, fontWeight: 400, opacity: 0.85, marginBottom: 4 }}>Inbox Zero Days (Business)</div>
+                    {inboxZeroBusinessDays}
+                  </div>
+                </td>
+                <td align="center" style={{ padding: 8 }}>
+                  <div style={{ background: "#10b981", color: "#fff", borderRadius: 8, padding: "14px 0", fontSize: 16, fontWeight: 600, minWidth: 120, textAlign: "center" }}>
+                    <div style={{ fontSize: 13, fontWeight: 400, opacity: 0.85, marginBottom: 4 }}>Consecutive Inbox Zero Days</div>
+                    {consecutiveInboxZeroDays}
                   </div>
                 </td>
               </tr>
