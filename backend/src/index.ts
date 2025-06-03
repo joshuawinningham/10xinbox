@@ -11,6 +11,7 @@ import React from 'react';
 import cors from '@fastify/cors';
 import { DateTime } from 'luxon';
 import { GaxiosResponse } from 'gaxios';
+import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config({ path: '.env.local' });
 
@@ -1292,14 +1293,23 @@ fastify.post('/api/gmail/send', async (request, reply) => {
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // 4. Create raw email message (RFC 5322)
+    // 4. Generate a unique email_id for tracking
+    const email_id = uuidv4();
+    // 5. Append tracking pixel to the body
+    const trackingPixel = `<img src="${process.env.BASE_URL || 'http://localhost:3001'}/track/open?email_id=${email_id}&user_id=${user_id}" width="1" height="1" style="display:none;" />`;
+    const bodyWithPixel = body + trackingPixel;
+    // LOGGING: Show the email_id and tracking pixel
+    console.log('[SEND EMAIL] email_id:', email_id);
+    console.log('[SEND EMAIL] trackingPixel:', trackingPixel);
+
+    // 6. Create raw email message (RFC 5322)
     const messageParts = [
       `From: ${userName ? `${userName} <${userEmail}>` : userEmail}`,
       `To: ${to}`,
       `Subject: ${subject}`,
       'Content-Type: text/html; charset=utf-8',
       '',
-      body,
+      bodyWithPixel,
     ];
     const message = messageParts.join('\r\n');
     const encodedMessage = Buffer.from(message)
@@ -1308,18 +1318,186 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       .replace(/\//g, '_')
       .replace(/=+$/, '');
 
-    // 5. Send the email
+    // 7. Send the email
     await gmail.users.messages.send({
       userId: 'me',
       requestBody: {
         raw: encodedMessage,
       },
     });
+
+    // 8. Insert into sent_emails
+    // Parse to_name and to_email from the To field
+    let to_name = '', to_email = '';
+    const match = to.match(/^(.*?)(?:\s*<(.+?)>)?$/);
+    if (match) {
+      to_name = match[1]?.replace(/"/g, '').trim();
+      to_email = match[2] || match[1];
+      if (!to_email.includes('@')) to_email = '';
+    }
+    // LOGGING: Show the email_id used in sent_emails insert
+    console.log('[SEND EMAIL] sent_emails insert email_id:', email_id);
+    const { data: sentEmailData, error: sentEmailError } = await supabase.from('sent_emails').insert({
+      email_id,
+      user_id,
+      to_email,
+      to_name,
+      subject,
+      sent_at: new Date().toISOString(),
+      body,
+    });
+    console.log('SENT_EMAILS INSERT:', { sentEmailData, sentEmailError });
+
     return reply.send({ success: true });
   } catch (err: any) {
     fastify.log.error(err);
     return reply.status(500).send({ error: err.message || 'Failed to send email' });
   }
+});
+
+// Endpoint: Email Open Analytics
+fastify.post('/api/email-tracking/analytics', async (request, reply) => {
+  const { user_id } = request.body as { user_id?: string };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  try {
+    // 1. Total sent emails (from email_stats table, sum emails_sent)
+    const { data: sentRows, error: sentError } = await supabase
+      .from('email_stats')
+      .select('emails_sent')
+      .eq('user_id', user_id);
+    if (sentError) throw sentError;
+    const totalSent = sentRows?.reduce((sum, row) => sum + (row.emails_sent || 0), 0) || 0;
+
+    // 2. Total opened emails (distinct email_id in email_opens)
+    const { data: openRows2, error: openError2 } = await supabase
+      .from('email_opens')
+      .select('email_id')
+      .eq('user_id', user_id);
+    if (openError2) throw openError2;
+    const openCounts: Record<string, number> = {};
+    openRows2?.forEach(row => {
+      if (row.email_id) {
+        openCounts[row.email_id] = (openCounts[row.email_id] || 0) + 1;
+      }
+    });
+    let mostOpened = null;
+    const sorted = Object.entries(openCounts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0) {
+      mostOpened = { email_id: sorted[0][0], count: sorted[0][1] };
+    }
+
+    // 3. Open rate
+    const openRate = totalSent > 0 ? (Object.keys(openCounts).length / totalSent) * 100 : 0;
+
+    // 4. Opens over time (last 30 days)
+    const { data: openEvents, error: openEventsError } = await supabase
+      .from('email_opens')
+      .select('opened_at')
+      .eq('user_id', user_id)
+      .gte('opened_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    if (openEventsError) throw openEventsError;
+    // Group by date
+    const opensByDate: Record<string, number> = {};
+    openEvents?.forEach(ev => {
+      const date = ev.opened_at?.slice(0, 10); // YYYY-MM-DD
+      if (date) opensByDate[date] = (opensByDate[date] || 0) + 1;
+    });
+    const opensOverTime = Object.entries(opensByDate).map(([date, count]) => ({ date, count }));
+
+    return reply.send({
+      totalSent,
+      totalOpened: Object.keys(openCounts).length,
+      openRate,
+      mostOpened,
+      opensOverTime,
+    });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to fetch analytics' });
+  }
+});
+
+// Update sent-emails endpoint to use sent_emails table
+fastify.post('/api/email-tracking/sent-emails', async (request, reply) => {
+  const { user_id } = request.body as { user_id?: string };
+  if (!user_id) return reply.status(400).send({ error: 'Missing user_id' });
+  const { data, error } = await supabase
+    .from('sent_emails')
+    .select('email_id, to_name, to_email, subject, sent_at')
+    .eq('user_id', user_id)
+    .order('sent_at', { ascending: false });
+  if (error) return reply.status(500).send({ error: error.message });
+  return reply.send(data);
+});
+
+// Get open events for a specific email
+fastify.post('/api/email-tracking/open-events', async (request, reply) => {
+  const { user_id, email_id } = request.body as { user_id?: string, email_id?: string };
+  if (!user_id || !email_id) return reply.status(400).send({ error: 'Missing user_id or email_id' });
+  const { data, error } = await supabase
+    .from('email_opens')
+    .select('opened_at, user_agent')
+    .eq('user_id', user_id)
+    .eq('email_id', email_id)
+    .order('opened_at', { ascending: true });
+  if (error) return reply.status(500).send({ error: error.message });
+  return reply.send(data);
+});
+
+// --- Tracking Pixel: Email Open Tracking ---
+fastify.get('/track/open', async (request, reply) => {
+  const { email_id, user_id } = request.query as { email_id?: string; user_id?: string };
+  if (!email_id || !user_id) {
+    // Always return a 1x1 GIF, even if params are missing, to avoid breaking emails
+    reply.header('Content-Type', 'image/gif');
+    return Buffer.from(
+      'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+      'base64'
+    );
+  }
+  // Log the open event in Supabase
+  const { data, error } = await supabase.from('email_opens').insert({
+    email_id,
+    user_id,
+    opened_at: new Date().toISOString(),
+    user_agent: request.headers['user-agent'] || '',
+  });
+  console.log('Supabase insert result:', { data, error });
+  reply.header('Content-Type', 'image/gif');
+  return Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+    'base64'
+  );
+});
+
+// Endpoint to get unique contacts for a user
+fastify.post('/api/contacts', async (request, reply) => {
+  const { user_id } = request.body as { user_id?: string };
+  if (!user_id) return reply.status(400).send({ error: 'Missing user_id' });
+
+  // Get all sent emails for this user
+  const { data, error } = await supabase
+    .from('sent_emails')
+    .select('to_name, to_email')
+    .eq('user_id', user_id);
+
+  if (error) return reply.status(500).send({ error: error.message });
+
+  // Build unique contacts list
+  const contactsMap: Record<string, { name: string; email: string }> = {};
+  (data || []).forEach(row => {
+    if (row.to_email) {
+      contactsMap[row.to_email] = {
+        name: row.to_name || row.to_email,
+        email: row.to_email,
+      };
+    }
+  });
+
+  // Return as array
+  return reply.send(Object.values(contactsMap));
 });
 
 const start = async () => {

@@ -105,6 +105,36 @@ function ComposeEmail({ open, onClose }: { open: boolean; onClose: () => void })
   const [sendError, setSendError] = useState<string | null>(null);
   const [fromName, setFromName] = useState<string | null>(null);
   const [fromEmail, setFromEmail] = useState<string | null>(null);
+  // Autocomplete state
+  const [contacts, setContacts] = useState<{ name: string; email: string }[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [filteredContacts, setFilteredContacts] = useState<{ name: string; email: string }[]>([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    // Fetch contacts from backend
+    fetch('http://localhost:3001/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.id }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setContacts(data);
+      });
+  }, [user, open]);
+
+  useEffect(() => {
+    if (to.length === 0) {
+      setFilteredContacts(contacts);
+    } else {
+      setFilteredContacts(
+        contacts.filter(c =>
+          `${c.name} <${c.email}>`.toLowerCase().includes(to.toLowerCase())
+        )
+      );
+    }
+  }, [to, contacts]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -182,19 +212,43 @@ function ComposeEmail({ open, onClose }: { open: boolean; onClose: () => void })
             <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-4 h-4" /></button>
           </div>
         </div>
-        <form className="p-4 space-y-2" onSubmit={handleSend}>
+        <form className="p-4 space-y-2" onSubmit={handleSend} autoComplete="off">
           {fromName && fromEmail && (
             <div className="mb-2 text-sm text-muted-foreground">
               <span>From: <span className="font-medium text-foreground">{fromName}</span> (<span className="text-muted-foreground">{fromEmail}</span>)</span>
             </div>
           )}
-          <input
-            className="w-full rounded border px-3 py-2 bg-background text-foreground"
-            placeholder="To"
-            value={to}
-            onChange={e => setTo(e.target.value)}
-            disabled={sending}
-          />
+          <div className="relative">
+            <input
+              className="w-full rounded border px-3 py-2 bg-background text-foreground"
+              placeholder="To"
+              value={to}
+              onChange={e => {
+                setTo(e.target.value);
+                setShowDropdown(true);
+              }}
+              onFocus={() => setShowDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+              disabled={sending}
+              autoComplete="off"
+            />
+            {showDropdown && filteredContacts.length > 0 && (
+              <div className="absolute left-0 top-full z-10 w-full bg-white border border-gray-200 rounded shadow mt-1 max-h-48 overflow-y-auto">
+                {filteredContacts.map((c) => (
+                  <div
+                    key={c.email}
+                    className="px-3 py-2 cursor-pointer hover:bg-gray-100"
+                    onMouseDown={() => {
+                      setTo(`${c.name} <${c.email}>`);
+                      setShowDropdown(false);
+                    }}
+                  >
+                    {c.name} <span className="text-muted-foreground">{`<${c.email}>`}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <input
             className="w-full rounded border px-3 py-2 bg-background text-foreground"
             placeholder="Subject"
@@ -230,19 +284,43 @@ function ComposeEmail({ open, onClose }: { open: boolean; onClose: () => void })
             <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-4 h-4" /></button>
           </div>
         </div>
-        <form className="p-6 space-y-4" onSubmit={handleSend}>
+        <form className="p-6 space-y-4" onSubmit={handleSend} autoComplete="off">
           {fromName && fromEmail && (
             <div className="mb-2 text-sm text-muted-foreground">
               <span>From: <span className="font-medium text-foreground">{fromName}</span> (<span className="text-muted-foreground">{fromEmail}</span>)</span>
             </div>
           )}
-          <input
-            className="w-full rounded border px-3 py-2 bg-background text-foreground"
-            placeholder="To"
-            value={to}
-            onChange={e => setTo(e.target.value)}
-            disabled={sending}
-          />
+          <div className="relative">
+            <input
+              className="w-full rounded border px-3 py-2 bg-background text-foreground"
+              placeholder="To"
+              value={to}
+              onChange={e => {
+                setTo(e.target.value);
+                setShowDropdown(true);
+              }}
+              onFocus={() => setShowDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+              disabled={sending}
+              autoComplete="off"
+            />
+            {showDropdown && filteredContacts.length > 0 && (
+              <div className="absolute left-0 top-full z-10 w-full bg-white border border-gray-200 rounded shadow mt-1 max-h-48 overflow-y-auto">
+                {filteredContacts.map((c) => (
+                  <div
+                    key={c.email}
+                    className="px-3 py-2 cursor-pointer hover:bg-gray-100"
+                    onMouseDown={() => {
+                      setTo(`${c.name} <${c.email}>`);
+                      setShowDropdown(false);
+                    }}
+                  >
+                    {c.name} <span className="text-muted-foreground">{`<${c.email}>`}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <input
             className="w-full rounded border px-3 py-2 bg-background text-foreground"
             placeholder="Subject"

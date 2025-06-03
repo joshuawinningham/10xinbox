@@ -25,6 +25,7 @@ import ConfirmEmail from '@/pages/ConfirmEmail';
 import TopSenders from '@/pages/TopSenders';
 import InboxZero from '@/pages/InboxZero';
 import Mail from '@/pages/Mail';
+import EmailTracking from '@/pages/EmailTracking';
 import './App.css';
 import { applyTheme } from '@/lib/theme-utils';
 
@@ -88,6 +89,16 @@ function Layout({ children }: { children: React.ReactNode }) {
             >
               <Calendar className="h-5 w-5" />
               Inbox Zero
+            </Link>
+            <Link
+              to="/email-tracking"
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent",
+                location.pathname === "/email-tracking" && "bg-accent text-primary"
+              )}
+            >
+              <MailIcon className="h-5 w-5" />
+              Email Tracking
             </Link>
             <Link
               to="/settings"
@@ -167,6 +178,7 @@ function App() {
             <Route index element={<Navigate to="/settings/profile" replace />} />
             <Route path="profile" element={<SettingsProfile />} />
           </Route>
+          <Route path="/email-tracking" element={<PrivateRoute><EmailTracking /></PrivateRoute>} />
         </Routes>
       </Layout>
     </Router>
