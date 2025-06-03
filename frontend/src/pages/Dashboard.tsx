@@ -79,7 +79,7 @@ export default function Dashboard() {
       setResponseLoading(true);
       setResponseError(null);
       try {
-        const res = await fetch('http://localhost:3001/api/gmail/response-time', {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/response-time`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user.id }),
@@ -103,7 +103,7 @@ export default function Dashboard() {
       setInboxZeroLoading(true);
       setInboxZeroError(null);
       try {
-        const res = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/inbox-zero-history`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user.id }),
@@ -140,7 +140,7 @@ export default function Dashboard() {
     const fetchConsecutiveInboxZero = async () => {
       if (!user?.id) return;
       try {
-        const res = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/inbox-zero-history`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user.id }),

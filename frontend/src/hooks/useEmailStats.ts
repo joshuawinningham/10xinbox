@@ -23,7 +23,7 @@ export function useEmailStats(view: EmailStatsView) {
       try {
         let stats: any[] = [];
         if (view === 'hourly') {
-          const res = await fetch('http://localhost:3001/api/gmail/hourly-stats', {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/hourly-stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: user.id, time_zone: timeZone }),
@@ -38,7 +38,7 @@ export function useEmailStats(view: EmailStatsView) {
         } else {
           // For daily, monthly, yearly, fetch stats for up to 365 days
           const days = view === 'daily' ? 7 : view === 'monthly' ? 31 : 365;
-          const res = await fetch('http://localhost:3001/api/gmail/stats', {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/stats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: user.id, days }),

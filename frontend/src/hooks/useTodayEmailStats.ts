@@ -19,13 +19,13 @@ export function useTodayEmailStats() {
     }
     setLoading(true);
     Promise.all([
-      fetch('http://localhost:3001/api/gmail/fetch-stats', {
+      fetch(`${import.meta.env.VITE_API_URL}/api/gmail/fetch-stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.id, time_zone: timeZone, day: 'today' }),
       })
         .then(res => res.json()),
-      fetch('http://localhost:3001/api/gmail/fetch-stats', {
+      fetch(`${import.meta.env.VITE_API_URL}/api/gmail/fetch-stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.id, time_zone: timeZone, day: 'yesterday' }),

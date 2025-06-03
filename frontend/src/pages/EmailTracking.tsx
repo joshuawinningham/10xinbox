@@ -28,7 +28,7 @@ export default function EmailTracking() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch('http://localhost:3001/api/email-tracking/analytics', {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/email-tracking/analytics`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user.id }),
@@ -55,7 +55,7 @@ export default function EmailTracking() {
       setSentLoading(true);
       setSentError(null);
       try {
-        const res = await fetch('http://localhost:3001/api/email-tracking/sent-emails', {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/email-tracking/sent-emails`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user.id }),
@@ -77,7 +77,7 @@ export default function EmailTracking() {
     if (!user) return;
     async function fetchOpenedEmailIds() {
       try {
-        const res = await fetch('http://localhost:3001/api/email-tracking/analytics', {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/email-tracking/analytics`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user.id }),
@@ -91,7 +91,7 @@ export default function EmailTracking() {
           // But since we don't have openRows2, let's fetch open events for all sent emails
         }
         // Instead, fetch all open events for all sent emails
-        const res2 = await fetch('http://localhost:3001/api/email-tracking/sent-emails', {
+        const res2 = await fetch(`${import.meta.env.VITE_API_URL}/api/email-tracking/sent-emails`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user.id }),
@@ -103,7 +103,7 @@ export default function EmailTracking() {
         // We'll fetch open events for each email and build a set
         const openedSet = new Set<string>();
         await Promise.all(emailIds.map(async (email_id: string) => {
-          const res3 = await fetch('http://localhost:3001/api/email-tracking/open-events', {
+          const res3 = await fetch(`${import.meta.env.VITE_API_URL}/api/email-tracking/open-events`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: user.id, email_id }),
@@ -126,7 +126,7 @@ export default function EmailTracking() {
     setOpenEventsLoading(true);
     setOpenEventsError(null);
     try {
-      const res = await fetch('http://localhost:3001/api/email-tracking/open-events', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/email-tracking/open-events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.id, email_id: email.email_id }),

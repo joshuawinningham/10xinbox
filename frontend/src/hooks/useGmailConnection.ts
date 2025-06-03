@@ -9,7 +9,7 @@ export function useGmailConnection(userId: string | undefined) {
     if (!userId) return;
     setLoading(true);
     setError(null);
-    fetch('http://localhost:3001/api/gmail/is-connected', {
+    fetch(`${import.meta.env.VITE_API_URL}/api/gmail/is-connected`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),

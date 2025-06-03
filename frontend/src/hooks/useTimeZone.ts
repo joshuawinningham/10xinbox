@@ -14,7 +14,7 @@ export function useTimeZone() {
       return;
     }
     setLoading(true);
-    fetch('http://localhost:3001/api/auth/get-timezone', {
+    fetch(`${import.meta.env.VITE_API_URL}/api/auth/get-timezone`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: user.id }),
@@ -34,7 +34,7 @@ export function useTimeZone() {
   const updateTimeZone = useCallback((newTimeZone: string) => {
     if (!user?.id) return;
     setLoading(true);
-    fetch('http://localhost:3001/api/auth/set-timezone', {
+    fetch(`${import.meta.env.VITE_API_URL}/api/auth/set-timezone`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: user.id, time_zone: newTimeZone }),

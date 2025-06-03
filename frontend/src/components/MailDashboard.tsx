@@ -113,7 +113,7 @@ function ComposeEmail({ open, onClose }: { open: boolean; onClose: () => void })
   useEffect(() => {
     if (!user?.id) return;
     // Fetch contacts from backend
-    fetch('http://localhost:3001/api/contacts', {
+    fetch(`${import.meta.env.VITE_API_URL}/api/contacts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: user.id }),
@@ -143,13 +143,13 @@ function ComposeEmail({ open, onClose }: { open: boolean; onClose: () => void })
     setFromName(name);
     setFromEmail(email);
     if (!name || !email) {
-      fetch(`http://localhost:3001/api/gmail/is-connected`, {
+      fetch(`${import.meta.env.VITE_API_URL}/api/gmail/is-connected`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.id }),
       })
         .then(() =>
-          fetch(`http://localhost:54321/rest/v1/gmail_tokens?user_id=eq.${user.id}`, {
+          fetch(`${import.meta.env.VITE_API_URL}/rest/v1/gmail_tokens?user_id=eq.${user.id}`, {
             headers: { 'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY }
           })
         )
@@ -169,7 +169,7 @@ function ComposeEmail({ open, onClose }: { open: boolean; onClose: () => void })
     setSendSuccess(false);
     setSendError(null);
     try {
-      const res = await fetch('http://localhost:3001/api/gmail/send', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -442,7 +442,7 @@ export default function MailDashboard() {
     setError(null);
     setEmails([]);
     setSelectedEmailId(null);
-    const url = new URL('http://localhost:3001/api/gmail/messages');
+    const url = new URL(`${import.meta.env.VITE_API_URL}/api/gmail/messages`);
     url.searchParams.set('user_id', user.id);
     url.searchParams.set('label', selectedFolder);
     let searchQuery = search;
@@ -472,7 +472,7 @@ export default function MailDashboard() {
       return;
     }
     setBodyLoading(true);
-    fetch(`http://localhost:3001/api/gmail/message?user_id=${user.id}&message_id=${selectedEmailId}`)
+    fetch(`${import.meta.env.VITE_API_URL}/api/gmail/message?user_id=${user.id}&message_id=${selectedEmailId}`)
       .then(res => res.json())
       .then(data => {
         setEmailBody(data.body || '');
@@ -500,13 +500,13 @@ export default function MailDashboard() {
     setFromName(name);
     setFromEmail(email);
     if (!name || !email) {
-      fetch(`http://localhost:3001/api/gmail/is-connected`, {
+      fetch(`${import.meta.env.VITE_API_URL}/api/gmail/is-connected`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.id }),
       })
         .then(() =>
-          fetch(`http://localhost:54321/rest/v1/gmail_tokens?user_id=eq.${user.id}`, {
+          fetch(`${import.meta.env.VITE_API_URL}/rest/v1/gmail_tokens?user_id=eq.${user.id}`, {
             headers: { 'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY }
           })
         )
@@ -675,7 +675,7 @@ export default function MailDashboard() {
                             : e
                         ));
                         // Call backend to mark as read
-                        fetch('http://localhost:3001/api/gmail/mark-read', {
+                        fetch(`${import.meta.env.VITE_API_URL}/api/gmail/mark-read`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ user_id: user.id, message_id: email.id })
@@ -782,7 +782,7 @@ export default function MailDashboard() {
                           setReplySuccess(false);
                           setReplyError(null);
                           try {
-                            const res = await fetch('http://localhost:3001/api/gmail/send', {
+                            const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({
