@@ -1,16 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { useAuth } from '@/hooks/useAuth';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Eye, EyeOff } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function EmailTracking() {
   const { user, loading: authLoading } = useAuth();
-  const [analytics, setAnalytics] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   // New state for sent emails and open events
   const [sentEmails, setSentEmails] = useState<any[]>([]);
   const [sentLoading, setSentLoading] = useState(true);
@@ -21,33 +15,6 @@ export default function EmailTracking() {
   const [openEventsError, setOpenEventsError] = useState<string | null>(null);
   // Opened email_ids
   const [openedEmailIds, setOpenedEmailIds] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!user) return;
-    async function fetchAnalytics() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/email-tracking/analytics`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: user.id }),
-        });
-        if (!res.ok) throw new Error('Failed to fetch analytics');
-        const data = await res.json();
-        setAnalytics(data);
-        // Set of opened email_ids
-        if (data && data.mostOpened) {
-          // We'll fetch all opened email_ids below
-        }
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchAnalytics();
-  }, [user]);
 
   useEffect(() => {
     if (!user) return;

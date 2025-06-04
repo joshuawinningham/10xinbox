@@ -7,8 +7,10 @@ backend/node_modules/
 .env
 .env.*
 frontend/.env.local
+frontend/.env.production
 frontend/.env.*
 backend/.env.local
+backend/.env.production
 backend/.env.*
 
 # OS generated files

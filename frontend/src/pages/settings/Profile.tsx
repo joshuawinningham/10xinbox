@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import { Mail } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -21,6 +20,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { connectGmail, disconnectGmail } from '@/lib/gmail';
 import { useGmailConnection } from '@/hooks/useGmailConnection';
 import { useTimeZone } from '@/hooks/useTimeZone';
+import { Mail } from 'lucide-react';
 
 const timezones = [
   "UTC",

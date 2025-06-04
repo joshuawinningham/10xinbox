@@ -1,5 +1,3 @@
-import React from 'react';
-import { Mail } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -16,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import PageHeading from '@/components/PageHeading';
+import { Mail } from 'lucide-react';
 
 const timezones = [
   "UTC",

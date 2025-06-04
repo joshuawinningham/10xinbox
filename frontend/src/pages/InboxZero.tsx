@@ -3,16 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/hooks/useAuth';
 import PageHeading from '@/components/PageHeading';
 
-// Helper to get day of week (0=Sun, 6=Sat)
-function getDayOfWeek(dateStr: string) {
-  return new Date(dateStr).getDay();
-}
-
-// Define weekday headers at the top so it's available for all logic
-const weekdayHeaders = ["M","T","W","T","F","S","S"];
-
 // Helper to get weekday index with Monday as 0
-function getMondayStartWeekday(date) {
+function getMondayStartWeekday(date: Date) {
   const day = date.getDay();
   return day === 0 ? 6 : day - 1;
 }
@@ -91,9 +83,12 @@ export default function InboxZero() {
   }
   // Flatten for grid rendering (headers: M-F)
   const businessDayHeaders = ["M","T","W","T","F"];
-  const calendarGrid = [
-    ...businessDayHeaders.map((d) => ({ type: 'header', label: d })),
-    ...weeks.flat().map((d) => ({ type: 'day', value: d })),
+  // Define types for calendar grid
+  interface HeaderCell { type: 'header'; label: string; }
+  interface DayCell { type: 'day'; value: any; }
+  const calendarGrid: Array<HeaderCell | DayCell> = [
+    ...businessDayHeaders.map((d) => ({ type: 'header' as const, label: d })),
+    ...weeks.flat().map((d) => ({ type: 'day' as const, value: d })),
   ];
 
   return (

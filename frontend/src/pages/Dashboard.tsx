@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { MailIcon, SendIcon, FileText, AlertTriangle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { FileText, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Button } from '@/components/ui/button';
@@ -10,52 +10,6 @@ import { useEmailStats, EmailStatsView } from '@/hooks/useEmailStats';
 import { useAuth } from '@/hooks/useAuth';
 import { connectGmail } from '@/lib/gmail';
 import PageHeading from '@/components/PageHeading';
-
-const hourlyVolumeData = [
-  { name: '1AM', received: 8, sent: 5 },
-  { name: '2AM', received: 6, sent: 4 },
-  { name: '3AM', received: 4, sent: 2 },
-  { name: '4AM', received: 3, sent: 2 },
-  { name: '5AM', received: 5, sent: 3 },
-  { name: '6AM', received: 12, sent: 8 },
-  { name: '7AM', received: 25, sent: 18 },
-  { name: '8AM', received: 45, sent: 35 },
-  { name: '9AM', received: 68, sent: 52 },
-  { name: '10AM', received: 72, sent: 58 },
-  { name: '11AM', received: 65, sent: 50 },
-  { name: '12PM', received: 58, sent: 45 },
-];
-
-const dailyVolumeData = [
-  { name: 'Mon', received: 45, sent: 32 },
-  { name: 'Tue', received: 78, sent: 65 },
-  { name: 'Wed', received: 95, sent: 78 },
-  { name: 'Thu', received: 87, sent: 69 },
-  { name: 'Fri', received: 75, sent: 55 },
-  { name: 'Sat', received: 35, sent: 28 },
-  { name: 'Sun', received: 42, sent: 31 },
-];
-
-const monthlyVolumeData = Array.from({ length: 31 }, (_, i) => ({
-  name: (i + 1).toString(),
-  received: Math.floor(Math.random() * (200 - 100) + 100),
-  sent: Math.floor(Math.random() * (150 - 80) + 80),
-}));
-
-const yearlyVolumeData = [
-  { name: 'June', received: 4800, sent: 4200 },
-  { name: 'July', received: 4600, sent: 4100 },
-  { name: 'Aug', received: 5100, sent: 4500 },
-  { name: 'Sept', received: 4900, sent: 4300 },
-  { name: 'Oct', received: 4700, sent: 4150 },
-  { name: 'Nov', received: 4850, sent: 4250 },
-  { name: 'Dec', received: 4300, sent: 3900 },
-  { name: 'Jan', received: 4550, sent: 4050 },
-  { name: 'Feb', received: 4750, sent: 4200 },
-  { name: 'Mar', received: 5200, sent: 4600 },
-  { name: 'Apr', received: 4950, sent: 4400 },
-  { name: 'May', received: 5150, sent: 4550 },
-];
 
 export default function Dashboard() {
   const [period, setPeriod] = useState<EmailStatsView>("hourly");
@@ -291,6 +245,9 @@ export default function Dashboard() {
     return { bottom: 20, left: 10, right: 10 };
   };
 
+  const received = emailsReceived ?? 0;
+  const sent = emailsSent ?? 0;
+
   return (
     <>
       <PageHeading>Dashboard</PageHeading>
@@ -324,13 +281,13 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-primary">
-              {loading ? '...' : error ? '--' : emailsReceived}
+              {loading ? '...' : error ? '--' : received}
             </div>
             <p className="text-sm text-muted-foreground mt-2">
               {loading || error ? '--' :
                 emailsReceivedYesterday === 0 || emailsReceivedYesterday == null
                   ? '+0% from yesterday'
-                  : `${emailsReceivedYesterday === 0 ? '+0' : ((emailsReceived - emailsReceivedYesterday) / emailsReceivedYesterday * 100 > 0 ? '+' : '')}${((emailsReceived - emailsReceivedYesterday) / (emailsReceivedYesterday || 1) * 100).toFixed(0)}% from yesterday`}
+                  : `${emailsReceivedYesterday === 0 ? '+0' : ((received - emailsReceivedYesterday) / emailsReceivedYesterday * 100 > 0 ? '+' : '')}${((received - emailsReceivedYesterday) / (emailsReceivedYesterday || 1) * 100).toFixed(0)}% from yesterday`}
             </p>
           </CardContent>
         </Card>
@@ -341,13 +298,13 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-primary">
-              {loading ? '...' : error ? '--' : emailsSent}
+              {loading ? '...' : error ? '--' : sent}
             </div>
             <p className="text-sm text-muted-foreground mt-2">
               {loading || error ? '--' :
                 emailsSentYesterday === 0 || emailsSentYesterday == null
                   ? '+0% from yesterday'
-                  : `${emailsSentYesterday === 0 ? '+0' : ((emailsSent - emailsSentYesterday) / emailsSentYesterday * 100 > 0 ? '+' : '')}${((emailsSent - emailsSentYesterday) / (emailsSentYesterday || 1) * 100).toFixed(0)}% from yesterday`}
+                  : `${emailsSentYesterday === 0 ? '+0' : ((sent - emailsSentYesterday) / emailsSentYesterday * 100 > 0 ? '+' : '')}${((sent - emailsSentYesterday) / (emailsSentYesterday || 1) * 100).toFixed(0)}% from yesterday`}
             </p>
           </CardContent>
         </Card>
@@ -404,7 +361,7 @@ export default function Dashboard() {
           {success && <span className="text-green-600 text-xs">{success}</span>}
           {sendError && <span className="text-red-600 text-xs">{sendError}</span>}
         </div>
-        <ToggleGroup type="single" value={period} onValueChange={(value) => value && setPeriod(value)}>
+        <ToggleGroup type="single" value={period} onValueChange={(value) => value && setPeriod(value as EmailStatsView)}>
           <ToggleGroupItem value="hourly" aria-label="Hourly view">
             Hourly
           </ToggleGroupItem>

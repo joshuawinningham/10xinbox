@@ -1,4 +1,4 @@
-import { themes, type Theme } from './themes';
+import { themes } from './themes';
 
 export function applyTheme(themeName: string) {
   const theme = themes.find((t) => t.name === themeName);

@@ -1,25 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, SendIcon, Settings, User, LogOut, MoreVertical, Calendar } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
+import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, Settings, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from '@/lib/utils';
 import Dashboard from '@/pages/Dashboard';
 import SettingsLayout from '@/pages/settings/Layout';
 import SettingsProfile from '@/pages/settings/Profile';
 import CreateAccount from '@/pages/CreateAccount';
 import Login from '@/pages/Login';
-import { useAuth } from '@/hooks/useAuth';
 import { SidebarProfile } from '@/components/SidebarProfile';
 import ConfirmEmail from '@/pages/ConfirmEmail';
 import TopSenders from '@/pages/TopSenders';
@@ -28,11 +16,11 @@ import Mail from '@/pages/Mail';
 import EmailTracking from '@/pages/EmailTracking';
 import './App.css';
 import { applyTheme } from '@/lib/theme-utils';
+import { useAuth } from '@/hooks/useAuth';
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const location = useLocation();
-  const { user, logout } = useAuth();
 
   // Don't show the layout on the create account and login pages
   if (location.pathname === '/create-account' || location.pathname === '/login') {

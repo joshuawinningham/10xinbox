@@ -63,10 +63,11 @@ export function useEmailStats(view: EmailStatsView) {
                 daily[day].emails_received += row.emails_received;
               }
             });
-            stats = Array.from({ length: daysInMonth }, (_, i) => ({
+            const days = typeof daysInMonth === 'number' ? daysInMonth : 0;
+            stats = Array.from({ length: days }, (_, i) => ({
               date: (i + 1).toString(),
-              emails_sent: daily[i + 1]?.emails_sent || 0,
-              emails_received: daily[i + 1]?.emails_received || 0,
+              emails_sent: daily[i + 1]?.emails_sent ?? 0,
+              emails_received: daily[i + 1]?.emails_received ?? 0,
             }));
           } else if (view === 'yearly') {
             // Aggregate by month for last 12 months
