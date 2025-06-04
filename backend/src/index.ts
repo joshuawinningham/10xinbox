@@ -23,10 +23,12 @@ fastify.register(cors, {
   credentials: true,
 });
 
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  'http://localhost:3001/api/auth/google/callback'
+  `${BASE_URL}/api/auth/google/callback`
 );
 
 const SCOPES = [
@@ -136,7 +138,7 @@ async function getValidAccessToken(user_id: string) {
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    'http://localhost:3001/api/auth/google/callback'
+    `${BASE_URL}/api/auth/google/callback`
   );
   oauth2Client.setCredentials({ refresh_token });
 
