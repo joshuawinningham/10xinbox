@@ -394,7 +394,7 @@ cron.schedule('0 * * * *', async () => {
             fastify.log.error('Failed to fetch hourly stats for email report:', err);
           }
           // Fetch inbox zero history for the current month
-          const inboxZeroRes = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+          const inboxZeroRes = await fetch(`${BASE_URL}/api/gmail/inbox-zero-history`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: user.user_id, time_zone: tz }),
@@ -428,7 +428,7 @@ cron.schedule('0 * * * *', async () => {
           const consecutiveInboxZeroDays = streak;
 
           // Calculate Avg. Response Time (for today)
-          const responseRes = await fetch('http://localhost:3001/api/gmail/response-time', {
+          const responseRes = await fetch(`${BASE_URL}/api/gmail/response-time`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_id: user.user_id, time_zone: tz, day: 'today' }),
@@ -596,7 +596,7 @@ fastify.post('/api/report/send', async (request, reply) => {
     }
 
     // Fetch inbox zero history for the current month
-    const inboxZeroRes = await fetch('http://localhost:3001/api/gmail/inbox-zero-history', {
+    const inboxZeroRes = await fetch(`${BASE_URL}/api/gmail/inbox-zero-history`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id, time_zone: tz }),
@@ -630,7 +630,7 @@ fastify.post('/api/report/send', async (request, reply) => {
     const consecutiveInboxZeroDays = streak;
 
     // Calculate Avg. Response Time (for today)
-    const responseRes = await fetch('http://localhost:3001/api/gmail/response-time', {
+    const responseRes = await fetch(`${BASE_URL}/api/gmail/response-time`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id, time_zone: tz, day: 'today' }),
@@ -1298,7 +1298,7 @@ fastify.post('/api/gmail/send', async (request, reply) => {
     // 4. Generate a unique email_id for tracking
     const email_id = uuidv4();
     // 5. Append tracking pixel to the body
-    const trackingPixel = `<img src="${process.env.BASE_URL || 'http://localhost:3001'}/track/open?email_id=${email_id}&user_id=${user_id}" width="1" height="1" style="display:none;" />`;
+    const trackingPixel = `<img src="${BASE_URL}/track/open?email_id=${email_id}&user_id=${user_id}" width="1" height="1" style="display:none;" />`;
     const bodyWithPixel = body + trackingPixel;
     // LOGGING: Show the email_id and tracking pixel
     console.log('[SEND EMAIL] email_id:', email_id);
