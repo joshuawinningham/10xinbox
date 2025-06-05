@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
-import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, Settings, Calendar } from 'lucide-react';
+import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, Settings, Calendar, Eye, BarChart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import Dashboard from '@/pages/Dashboard';
@@ -65,7 +65,7 @@ function Layout({ children }: { children: React.ReactNode }) {
                 location.pathname === "/top-senders" && "bg-accent text-primary"
               )}
             >
-              <MailIcon className="h-5 w-5" />
+              <BarChart className="h-5 w-5" />
               Top Senders
             </Link>
             <Link
@@ -85,7 +85,7 @@ function Layout({ children }: { children: React.ReactNode }) {
                 location.pathname === "/email-tracking" && "bg-accent text-primary"
               )}
             >
-              <MailIcon className="h-5 w-5" />
+              <Eye className="h-5 w-5" />
               Email Tracking
             </Link>
             <Link

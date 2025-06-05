@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./ui/resizable";
-import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, X, Minimize2, Maximize2, Reply, ReplyAll, MoreVertical } from 'lucide-react';
+import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import DOMPurify from 'dompurify';
+import { Card } from '@/components/ui/card';
 
 const FOLDER_LABELS = [
   { name: "Inbox", label: "INBOX", icon: <Inbox className="h-4 w-4 mr-2" /> },
@@ -94,259 +96,6 @@ function formatEmailDetailDate(dateStr: string) {
   return `${date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (${getTimeAgo(dateStr)})`;
 }
 
-function ComposeEmail({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { user } = useAuth();
-  const [isShrunk, setIsShrunk] = useState(false);
-  const [to, setTo] = useState('');
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const [sending, setSending] = useState(false);
-  const [sendSuccess, setSendSuccess] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [fromName, setFromName] = useState<string | null>(null);
-  const [fromEmail, setFromEmail] = useState<string | null>(null);
-  // Autocomplete state
-  const [contacts, setContacts] = useState<{ name: string; email: string }[]>([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [filteredContacts, setFilteredContacts] = useState<{ name: string; email: string }[]>([]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    // Fetch contacts from backend
-    fetch(`${import.meta.env.VITE_API_URL}/api/contacts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: user.id }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) setContacts(data);
-      });
-  }, [user, open]);
-
-  useEffect(() => {
-    if (to.length === 0) {
-      setFilteredContacts(contacts);
-    } else {
-      setFilteredContacts(
-        contacts.filter(c =>
-          `${c.name} <${c.email}>`.toLowerCase().includes(to.toLowerCase())
-        )
-      );
-    }
-  }, [to, contacts]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    const name = user.user_metadata?.name || user.name || null;
-    const email = user.email || null;
-    setFromName(name);
-    setFromEmail(email);
-    if (!name || !email) {
-      fetch(`${import.meta.env.VITE_API_URL}/api/gmail/is-connected`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
-      })
-        .then(() =>
-          fetch(`${import.meta.env.VITE_API_URL}/rest/v1/gmail_tokens?user_id=eq.${user.id}`, {
-            headers: { 'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY }
-          })
-        )
-        .then(res => res.json())
-        .then(data => {
-          if (Array.isArray(data) && data.length > 0) {
-            setFromName(data[0].name || null);
-            setFromEmail(data[0].email || null);
-          }
-        });
-    }
-  }, [user]);
-
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
-    setSending(true);
-    setSendSuccess(false);
-    setSendError(null);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user?.id,
-          to,
-          subject,
-          body,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
-      setSendSuccess(true);
-      setTo('');
-      setSubject('');
-      setBody('');
-      setTimeout(() => {
-        setSendSuccess(false);
-        onClose();
-      }, 1200);
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        setSendError(err.message || 'Failed to send email');
-      } else {
-        setSendError('Failed to send email');
-      }
-    } finally {
-      setSending(false);
-    }
-  }
-
-  // Modal or shrunk box
-  if (!open) return null;
-  if (isShrunk) {
-    return (
-      <div className="absolute z-50 shadow-lg rounded-lg border bg-card w-96 max-w-full bottom-4 right-4">
-        <div className="flex items-center justify-between px-4 py-2 border-b bg-muted rounded-t-lg">
-          <span className="font-semibold">New Message</span>
-          <div className="flex gap-2">
-            <button onClick={() => setIsShrunk(false)} className="p-1 rounded hover:bg-accent"><Maximize2 className="w-4 h-4" /></button>
-            <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-4 h-4" /></button>
-          </div>
-        </div>
-        <form className="p-4 space-y-2" onSubmit={handleSend} autoComplete="off">
-          {fromName && fromEmail && (
-            <div className="mb-2 text-sm text-muted-foreground">
-              <span>From: <span className="font-medium text-foreground">{fromName}</span> (<span className="text-muted-foreground">{fromEmail}</span>)</span>
-            </div>
-          )}
-          <div className="relative">
-            <input
-              className="w-full rounded border px-3 py-2 bg-background text-foreground"
-              placeholder="To"
-              value={to}
-              onChange={e => {
-                setTo(e.target.value);
-                setShowDropdown(true);
-              }}
-              onFocus={() => setShowDropdown(true)}
-              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-              disabled={sending}
-              autoComplete="off"
-            />
-            {showDropdown && filteredContacts.length > 0 && (
-              <div className="absolute left-0 top-full z-10 w-full bg-white border border-gray-200 rounded shadow mt-1 max-h-48 overflow-y-auto">
-                {filteredContacts.map((c) => (
-                  <div
-                    key={c.email}
-                    className="px-3 py-2 cursor-pointer hover:bg-gray-100"
-                    onMouseDown={() => {
-                      setTo(`${c.name} <${c.email}>`);
-                      setShowDropdown(false);
-                    }}
-                  >
-                    {c.name} <span className="text-muted-foreground">{`<${c.email}>`}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <input
-            className="w-full rounded border px-3 py-2 bg-background text-foreground"
-            placeholder="Subject"
-            value={subject}
-            onChange={e => setSubject(e.target.value)}
-            disabled={sending}
-          />
-          <textarea
-            className="w-full rounded border px-3 py-2 bg-background text-foreground min-h-[80px]"
-            placeholder="Message"
-            value={body}
-            onChange={e => setBody(e.target.value)}
-            disabled={sending}
-          />
-          <div className="flex justify-end gap-2 mt-2">
-            <button type="button" className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent" onClick={onClose} disabled={sending}>Cancel</button>
-            <button type="submit" className="px-4 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90" disabled={sending}>{sending ? 'Sending...' : 'Send'}</button>
-          </div>
-          {sendSuccess && <div className="text-green-600 mt-2">Email sent!</div>}
-          {sendError && <div className="text-red-600 mt-2">{sendError}</div>}
-        </form>
-      </div>
-    );
-  }
-  // Modal (centered)
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-card rounded-lg shadow-lg border w-full max-w-lg mx-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-muted rounded-t-lg">
-          <span className="font-semibold">New Message</span>
-          <div className="flex gap-2">
-            <button onClick={() => setIsShrunk(true)} className="p-1 rounded hover:bg-accent"><Minimize2 className="w-4 h-4" /></button>
-            <button onClick={onClose} className="p-1 rounded hover:bg-accent"><X className="w-4 h-4" /></button>
-          </div>
-        </div>
-        <form className="p-6 space-y-4" onSubmit={handleSend} autoComplete="off">
-          {fromName && fromEmail && (
-            <div className="mb-2 text-sm text-muted-foreground">
-              <span>From: <span className="font-medium text-foreground">{fromName}</span> (<span className="text-muted-foreground">{fromEmail}</span>)</span>
-            </div>
-          )}
-          <div className="relative">
-            <input
-              className="w-full rounded border px-3 py-2 bg-background text-foreground"
-              placeholder="To"
-              value={to}
-              onChange={e => {
-                setTo(e.target.value);
-                setShowDropdown(true);
-              }}
-              onFocus={() => setShowDropdown(true)}
-              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-              disabled={sending}
-              autoComplete="off"
-            />
-            {showDropdown && filteredContacts.length > 0 && (
-              <div className="absolute left-0 top-full z-10 w-full bg-white border border-gray-200 rounded shadow mt-1 max-h-48 overflow-y-auto">
-                {filteredContacts.map((c) => (
-                  <div
-                    key={c.email}
-                    className="px-3 py-2 cursor-pointer hover:bg-gray-100"
-                    onMouseDown={() => {
-                      setTo(`${c.name} <${c.email}>`);
-                      setShowDropdown(false);
-                    }}
-                  >
-                    {c.name} <span className="text-muted-foreground">{`<${c.email}>`}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <input
-            className="w-full rounded border px-3 py-2 bg-background text-foreground"
-            placeholder="Subject"
-            value={subject}
-            onChange={e => setSubject(e.target.value)}
-            disabled={sending}
-          />
-          <textarea
-            className="w-full rounded border px-3 py-2 bg-background text-foreground min-h-[120px]"
-            placeholder="Message"
-            value={body}
-            onChange={e => setBody(e.target.value)}
-            disabled={sending}
-          />
-          <div className="flex justify-end gap-2 mt-2">
-            <button type="button" className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent" onClick={onClose} disabled={sending}>Cancel</button>
-            <button type="submit" className="px-4 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90" disabled={sending}>{sending ? 'Sending...' : 'Send'}</button>
-          </div>
-          {sendSuccess && <div className="text-green-600 mt-2">Email sent!</div>}
-          {sendError && <div className="text-red-600 mt-2">{sendError}</div>}
-        </form>
-      </div>
-    </div>
-  );
-}
-
 interface Email {
   id: string;
   sender: string;
@@ -371,26 +120,25 @@ export default function MailDashboard() {
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const suggestionsRef = useRef<HTMLInputElement>(null);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
-  const [composeOpen, setComposeOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [replyBody, setReplyBody] = useState('');
-  const [replySending, setReplySending] = useState(false);
-  const [replySuccess, setReplySuccess] = useState(false);
-  const [replyError, setReplyError] = useState<string | null>(null);
-  const [replyMode, setReplyMode] = useState<'reply' | 'replyAll' | 'forward' | null>(null);
-  const [fromName, setFromName] = useState<string | null>(null);
-  const [fromEmail, setFromEmail] = useState<string | null>(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeMinimized, setComposeMinimized] = useState(false);
+  const [composeTo, setComposeTo] = useState('');
+  const [composeSubject, setComposeSubject] = useState('');
+  const [composeBody, setComposeBody] = useState('');
+  const [composeSending, setComposeSending] = useState(false);
+  const [composeSuccess, setComposeSuccess] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [composeToSuggestions, setComposeToSuggestions] = useState<string[]>([]);
+  const [composeToShowSuggestions, setComposeToShowSuggestions] = useState(false);
+  const [composeToHighlighted, setComposeToHighlighted] = useState(-1);
+  const composeToInputRef = useRef<HTMLInputElement>(null);
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
     new Set(
       emails
-        .map((email) => {
-          // Try to extract email address from sender string
-          const match = email.sender.match(/<(.+?)>/);
-          return match ? match[1] : email.sender;
-        })
+        .map((email) => email.sender)
         .filter(Boolean)
     )
   );
@@ -435,6 +183,19 @@ export default function MailDashboard() {
       setHighlightedIndex(-1);
     }
   }
+
+  // Filter suggestions as user types in To field
+  useEffect(() => {
+    if (!composeToShowSuggestions) return;
+    const input = composeTo.trim().toLowerCase();
+    if (!input) {
+      setComposeToSuggestions(uniqueSenders);
+      return;
+    }
+    setComposeToSuggestions(
+      uniqueSenders.filter(s => s.toLowerCase().includes(input))
+    );
+  }, [composeTo, composeToShowSuggestions, uniqueSenders]);
 
   useEffect(() => {
     if (!user) return;
@@ -493,42 +254,23 @@ export default function MailDashboard() {
     return [selectedEmail.sender];
   }
 
-  useEffect(() => {
-    if (!user?.id) return;
-    const name = user.user_metadata?.name || user.name || null;
-    const email = user.email || null;
-    setFromName(name);
-    setFromEmail(email);
-    if (!name || !email) {
-      fetch(`${import.meta.env.VITE_API_URL}/api/gmail/is-connected`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
-      })
-        .then(() =>
-          fetch(`${import.meta.env.VITE_API_URL}/rest/v1/gmail_tokens?user_id=eq.${user.id}`, {
-            headers: { 'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY }
-          })
-        )
-        .then(res => res.json())
-        .then(data => {
-          if (Array.isArray(data) && data.length > 0) {
-            setFromName(data[0].name || null);
-            setFromEmail(data[0].email || null);
-          }
-        });
-    }
-  }, [user]);
-
   return (
-    <div ref={cardRef} className="h-[80vh] rounded-lg shadow overflow-hidden border border-border flex relative">
+    <Card ref={cardRef} className="h-[80vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
       <ResizablePanelGroup direction="horizontal" className="flex w-full h-full">
         {/* Sidebar */}
         <ResizablePanel defaultSize={18} minSize={12} maxSize={28} className="flex flex-col bg-card">
           <aside className="h-full bg-card border-r border-gray-200 p-4 flex flex-col">
             <button
               className="w-full mb-4 rounded-lg bg-primary text-primary-foreground font-semibold py-2 shadow hover:bg-primary/90 transition-colors"
-              onClick={() => setComposeOpen(true)}
+              onClick={() => {
+                setComposeOpen(true);
+                setComposeMinimized(false);
+                setComposeTo('');
+                setComposeSubject('');
+                setComposeBody('');
+                setComposeError(null);
+                setComposeSuccess(false);
+              }}
             >
               Compose
             </button>
@@ -709,9 +451,15 @@ export default function MailDashboard() {
                       className="p-2 rounded hover:bg-accent"
                       title="Reply all"
                       onClick={() => {
-                        setReplyMode('replyAll');
-                        setReplyOpen(true);
-                        setReplyBody('');
+                        setComposeOpen(true);
+                        setComposeMinimized(false);
+                        setComposeError(null);
+                        setComposeSuccess(false);
+                        if (selectedEmail) {
+                          setComposeTo(getRecipients().join(', '));
+                          setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+                          setComposeBody('');
+                        }
                       }}
                     >
                       <ReplyAll className="w-5 h-5" />
@@ -722,9 +470,15 @@ export default function MailDashboard() {
                     className="p-2 rounded hover:bg-accent"
                     title="Reply"
                     onClick={() => {
-                      setReplyMode('reply');
-                      setReplyOpen(true);
-                      setReplyBody('');
+                      setComposeOpen(true);
+                      setComposeMinimized(false);
+                      setComposeError(null);
+                      setComposeSuccess(false);
+                      if (selectedEmail) {
+                        setComposeTo(selectedEmail.sender);
+                        setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+                        setComposeBody('');
+                      }
                     }}
                   >
                     <Reply className="w-5 h-5" />
@@ -745,182 +499,238 @@ export default function MailDashboard() {
                   <div>
                     <div
                       className="text-gray-800 whitespace-pre-line mb-6"
-                      dangerouslySetInnerHTML={{ __html: emailBody }}
+                      dangerouslySetInnerHTML={{
+                        __html: DOMPurify.sanitize(emailBody, { FORBID_TAGS: ['style'] })
+                      }}
                     />
-                    {/* Action Row at Bottom */}
-                    <div className="flex items-center gap-4 mt-4">
-                      <button
-                        className="p-2 rounded hover:bg-accent"
-                        title="Reply"
-                        onClick={() => {
-                          setReplyMode('reply');
-                          setReplyOpen(true);
-                          setReplyBody('');
-                        }}
-                      >
-                        <Reply className="w-5 h-5" />
-                      </button>
-                      <button
-                        className="p-2 rounded hover:bg-accent"
-                        title="Forward"
-                        onClick={() => {
-                          setReplyMode('forward');
-                          setReplyOpen(true);
-                          setReplyBody('');
-                        }}
-                      >
-                        <Reply className="w-5 h-5 scale-x-[-1]" />
-                      </button>
-                    </div>
-                    {/* Reply/Forward Form BELOW the email body */}
-                    {replyOpen && (
-                      <form
-                        className="mt-6 rounded-lg border bg-background shadow space-y-0"
-                        onSubmit={async e => {
-                          e.preventDefault();
-                          setReplySending(true);
-                          setReplySuccess(false);
-                          setReplyError(null);
-                          try {
-                            const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                user_id: user?.id,
-                                to:
-                                  replyMode === 'forward'
-                                    ? ''
-                                    : replyMode === 'replyAll'
-                                    ? getRecipients().map(s => {
-                                        const match = s.match(/^(.*?)\s*<(.+?)>$/);
-                                        return match ? `${match[1]} <${match[2]}>` : s;
-                                      }).join(', ')
-                                    : (() => {
-                                        const match = selectedEmail.sender.match(/^(.*?)\s*<(.+?)>$/);
-                                        return match ? `${match[1]} <${match[2]}>` : selectedEmail.sender;
-                                      })(),
-                                subject:
-                                  replyMode === 'forward'
-                                    ? `Fwd: ${selectedEmail.subject}`
-                                    : selectedEmail.subject.startsWith('Re:')
-                                    ? selectedEmail.subject
-                                    : `Re: ${selectedEmail.subject}`,
-                                body: replyBody,
-                                in_reply_to: replyMode === 'forward' ? undefined : selectedEmail.id,
-                              }),
-                            });
-                            const json = await res.json();
-                            if (!res.ok || json.error) throw new Error(json.error || 'Failed to send reply');
-                            setReplySuccess(true);
-                            setReplyBody('');
-                            setTimeout(() => {
-                              setReplySuccess(false);
-                              setReplyOpen(false);
-                              setReplyMode(null);
-                            }, 1200);
-                          } catch (err: unknown) {
-                            setReplyError(err instanceof Error ? err.message : 'Failed to send reply');
-                          } finally {
-                            setReplySending(false);
-                          }
-                        }}
-                      >
-                        {/* Header row for To and Subject */}
-                        <div className="flex flex-col md:flex-row gap-2 p-4 border-b bg-muted/60 rounded-t-lg">
-                          <div className="flex-1 flex flex-col gap-1">
-                            <label className="text-xs text-muted-foreground font-medium">To</label>
-                            <input
-                              className="rounded-lg border px-3 py-2 bg-background text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                              value={
-                                replyMode === 'forward'
-                                  ? ''
-                                  : replyMode === 'replyAll'
-                                  ? getRecipients().map(s => {
-                                      const match = s.match(/^(.*?)\s*<(.+?)>$/);
-                                      return match ? `${match[1]} <${match[2]}>` : s;
-                                    }).join(', ')
-                                  : (() => {
-                                      const match = selectedEmail.sender.match(/^(.*?)\s*<(.+?)>$/);
-                                      return match ? `${match[1]} <${match[2]}>` : selectedEmail.sender;
-                                    })()
-                              }
-                              disabled={replyMode !== 'forward'}
-                              placeholder={replyMode === 'forward' ? 'To' : ''}
-                            />
-                          </div>
-                          <div className="flex-1 flex flex-col gap-1">
-                            <label className="text-xs text-muted-foreground font-medium">Subject</label>
-                            <input
-                              className="rounded-lg border px-3 py-2 bg-background text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                              value={
-                                replyMode === 'forward'
-                                  ? `Fwd: ${selectedEmail.subject}`
-                                  : selectedEmail.subject.startsWith('Re:')
-                                  ? selectedEmail.subject
-                                  : `Re: ${selectedEmail.subject}`
-                              }
-                              disabled
-                            />
-                          </div>
-                        </div>
-                        {/* Reply textarea */}
-                        <div className="px-4 pb-2">
-                          {fromName && fromEmail && (
-                            <div className="mb-2 text-sm text-muted-foreground">
-                              <span>From: <span className="font-medium text-foreground">{fromName}</span> (<span className="text-muted-foreground">{fromEmail}</span>)</span>
-                            </div>
-                          )}
-                          <textarea
-                            className="w-full rounded-lg border px-3 py-3 min-h-[100px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                            style={{ backgroundColor: '#FFFFFF' }}
-                            placeholder={
-                              replyMode === 'forward'
-                                ? 'Forward this message...'
-                                : 'Write your reply...'
-                            }
-                            value={replyBody}
-                            onChange={e => setReplyBody(e.target.value)}
-                            disabled={replySending}
-                          />
-                        </div>
-                        {/* Action buttons */}
-                        <div className="flex justify-end gap-2 px-4 pb-4">
-                          <button
-                            type="button"
-                            className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent transition"
-                            onClick={() => {
-                              setReplyOpen(false);
-                              setReplyMode(null);
-                            }}
-                            disabled={replySending}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            className="px-4 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition"
-                            disabled={replySending}
-                          >
-                            {replySending ? 'Sending...' : replyMode === 'forward' ? 'Send forward' : 'Send reply'}
-                          </button>
-                        </div>
-                        {replySuccess && <div className="text-green-600 text-sm px-4 pb-2">Message sent!</div>}
-                        {replyError && <div className="text-red-600 text-sm px-4 pb-2">{replyError}</div>}
-                      </form>
-                    )}
                   </div>
                 )}
               </div>
             ) : (
-              <div className="text-gray-400 flex items-center justify-center h-full">Select an email to view its content.</div>
+              <div className="text-gray-400 flex items-center justify-center h-full">
+                Select an email to view its content.
+              </div>
             )}
           </main>
         </ResizablePanel>
+        <ResizableHandle withHandle />
       </ResizablePanelGroup>
-      {/* Compose Email Modal/Popout */}
-      {composeOpen && (
-        <ComposeEmail open={composeOpen} onClose={() => setComposeOpen(false)} />
+      {/* Floating Compose Popup - Fullscreen Overlay */}
+      {composeOpen && !composeMinimized && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-in fade-in">
+          <div className="w-full max-w-2xl bg-white border rounded-lg shadow-lg flex flex-col relative animate-in fade-in zoom-in-95" style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }}>
+            <div className="flex items-center justify-between px-4 py-2 border-b bg-muted rounded-t-lg">
+              <span className="font-semibold text-primary">New Message</span>
+              <div className="flex items-center gap-2">
+                <button
+                  className="p-1 rounded hover:bg-accent"
+                  title="Minimize"
+                  onClick={() => setComposeMinimized(true)}
+                >
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><rect x="4" y="9" width="12" height="2" rx="1" fill="currentColor" /></svg>
+                </button>
+                <button
+                  className="p-1 rounded hover:bg-accent"
+                  title="Close"
+                  onClick={() => setComposeOpen(false)}
+                >
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M6 6l8 8M6 14L14 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+                </button>
+              </div>
+            </div>
+            <form
+              className="flex flex-col gap-2 p-6"
+              onSubmit={async e => {
+                e.preventDefault();
+                setComposeSending(true);
+                setComposeError(null);
+                setComposeSuccess(false);
+                try {
+                  const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      user_id: user?.id,
+                      to: composeTo,
+                      subject: composeSubject,
+                      body: composeBody,
+                    }),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
+                  setComposeSuccess(true);
+                  setTimeout(() => {
+                    setComposeOpen(false);
+                    setComposeSuccess(false);
+                  }, 1200);
+                } catch (err: unknown) {
+                  setComposeError(err instanceof Error ? err.message : 'Failed to send email');
+                } finally {
+                  setComposeSending(false);
+                }
+              }}
+            >
+              <div className="relative">
+                <input
+                  ref={composeToInputRef}
+                  className="rounded border px-3 py-2 bg-background text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 transition w-full"
+                  placeholder="To"
+                  value={composeTo}
+                  onChange={e => {
+                    setComposeTo(e.target.value);
+                    setComposeToShowSuggestions(true);
+                    setComposeToHighlighted(-1);
+                  }}
+                  onFocus={() => setComposeToShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setComposeToShowSuggestions(false), 100)}
+                  onKeyDown={e => {
+                    if (!composeToShowSuggestions || composeToSuggestions.length === 0) return;
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setComposeToHighlighted(prev => (prev + 1) % composeToSuggestions.length);
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setComposeToHighlighted(prev => (prev - 1 + composeToSuggestions.length) % composeToSuggestions.length);
+                    } else if (e.key === 'Enter') {
+                      if (composeToHighlighted >= 0 && composeToHighlighted < composeToSuggestions.length) {
+                        setComposeTo(composeToSuggestions[composeToHighlighted]);
+                        setComposeToShowSuggestions(false);
+                        setComposeToHighlighted(-1);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setComposeToShowSuggestions(false);
+                      setComposeToHighlighted(-1);
+                    }
+                  }}
+                  required
+                />
+                {composeToShowSuggestions && composeToSuggestions.length > 0 && (
+                  <div className="absolute left-0 top-full z-50 w-full bg-white border border-gray-200 rounded shadow mt-1 max-h-60 overflow-y-auto">
+                    {composeToSuggestions.map((s, idx) => (
+                      <div
+                        key={s}
+                        className={`px-3 py-2 cursor-pointer hover:bg-gray-100 ${composeToHighlighted === idx ? 'bg-blue-100' : ''}`}
+                        onMouseDown={() => {
+                          setComposeTo(s);
+                          setComposeToShowSuggestions(false);
+                          setComposeToHighlighted(-1);
+                          composeToInputRef.current?.blur();
+                        }}
+                      >
+                        {s}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <input
+                className="rounded border px-3 py-2 bg-background text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                placeholder="Subject"
+                value={composeSubject}
+                onChange={e => setComposeSubject(e.target.value)}
+              />
+              <textarea
+                className="rounded border px-3 py-2 bg-background text-foreground min-h-[200px]"
+                placeholder="Message"
+                value={composeBody}
+                onChange={e => setComposeBody(e.target.value)}
+                required
+              />
+              <div className="flex justify-end gap-2 mt-2">
+                <button type="button" className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
+                <button type="submit" className="px-4 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90" disabled={composeSending}>{composeSending ? 'Sending...' : 'Send'}</button>
+              </div>
+              {composeSuccess && <div className="text-green-600 mt-2">Email sent!</div>}
+              {composeError && <div className="text-red-600 mt-2">{composeError}</div>}
+            </form>
+          </div>
+        </div>
       )}
-    </div>
+      {/* Minimized Compose Window (not just a bar) */}
+      {composeOpen && composeMinimized && (
+        <div className="absolute bottom-4 right-4 z-40 w-[600px] h-[420px] bg-white border rounded-lg shadow-lg flex flex-col animate-in fade-in zoom-in-95" style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }}>
+          <div className="flex items-center justify-between px-3 py-2 border-b bg-muted rounded-t-lg">
+            <span className="font-semibold text-primary text-sm">New Message</span>
+            <div className="flex items-center gap-2">
+              <button
+                className="p-1 rounded hover:bg-accent"
+                title="Maximize"
+                onClick={() => setComposeMinimized(false)}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="2" /></svg>
+              </button>
+              <button
+                className="p-1 rounded hover:bg-accent"
+                title="Close"
+                onClick={() => setComposeOpen(false)}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M6 6l8 8M6 14L14 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+              </button>
+            </div>
+          </div>
+          <form
+            className="flex flex-col gap-2 p-4 flex-1"
+            onSubmit={async e => {
+              e.preventDefault();
+              setComposeSending(true);
+              setComposeError(null);
+              setComposeSuccess(false);
+              try {
+                const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    user_id: user?.id,
+                    to: composeTo,
+                    subject: composeSubject,
+                    body: composeBody,
+                  }),
+                });
+                const json = await res.json();
+                if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
+                setComposeSuccess(true);
+                setTimeout(() => {
+                  setComposeOpen(false);
+                  setComposeSuccess(false);
+                }, 1200);
+              } catch (err: unknown) {
+                setComposeError(err instanceof Error ? err.message : 'Failed to send email');
+              } finally {
+                setComposeSending(false);
+              }
+            }}
+          >
+            <div className="relative">
+              <input
+                className="rounded border px-2 py-1 bg-background text-foreground font-medium text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition w-full"
+                placeholder="To"
+                value={composeTo}
+                onChange={e => setComposeTo(e.target.value)}
+                required
+              />
+            </div>
+            <input
+              className="rounded border px-2 py-1 bg-background text-foreground font-medium text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              placeholder="Subject"
+              value={composeSubject}
+              onChange={e => setComposeSubject(e.target.value)}
+            />
+            <textarea
+              className="rounded border px-2 py-1 bg-background text-foreground min-h-[220px] text-xs flex-1 resize-none"
+              placeholder="Message"
+              value={composeBody}
+              onChange={e => setComposeBody(e.target.value)}
+              required
+            />
+            <div className="flex justify-end gap-2 mt-2">
+              <button type="button" className="px-3 py-1 rounded bg-muted text-foreground hover:bg-accent text-xs" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
+              <button type="submit" className="px-3 py-1 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90 text-xs" disabled={composeSending}>{composeSending ? 'Sending...' : 'Send'}</button>
+            </div>
+            {composeSuccess && <div className="text-green-600 mt-2 text-xs">Email sent!</div>}
+            {composeError && <div className="text-red-600 mt-2 text-xs">{composeError}</div>}
+          </form>
+        </div>
+      )}
+    </Card>
   );
 } 
