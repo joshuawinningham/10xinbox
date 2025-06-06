@@ -54,7 +54,7 @@ type RealTimeReportEmailProps = {
   currentInboxCount?: number;
 };
 
-const baseUrl = "https://email-kpi.com";
+const baseUrl = "https://email-kpi.vercel.app";
 
 export default function RealTimeReportEmail({
   date,
@@ -253,7 +253,7 @@ export default function RealTimeReportEmail({
               Sent by <strong style={{ color: "#1a1a1a" }}>Email KPI App</strong>
             </Text>
             <Button
-              href="https://email-kpi.com"
+              href="https://email-kpi.vercel.app"
               style={{
                 background: "#2563eb",
                 color: "#fff",

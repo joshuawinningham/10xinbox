@@ -440,6 +440,10 @@ cron.schedule('0 * * * *', async () => {
             ? formatDuration(responseData.average_response_time)
             : '--';
 
+          // Calculate peak activity and busiest hour from hourlySent/hourlyReceived
+          const peakActivityHour = hourlySent && hourlySent.length ? hourlySent.indexOf(Math.max(...hourlySent)) : undefined;
+          const busiestHour = hourlyReceived && hourlyReceived.length ? hourlyReceived.indexOf(Math.max(...hourlyReceived)) : undefined;
+
           // Send email via Resend
           await sendEmail({
             to: toEmail,
@@ -454,8 +458,8 @@ cron.schedule('0 * * * *', async () => {
               hourlySent,
               hourlyReceived,
               currentInboxCount: stats.current_inbox_count,
-              peakActivityHour: stats.peak_activity_hour,
-              busiestHour: stats.busiest_hour,
+              peakActivityHour,
+              busiestHour,
             })
           });
           // Insert a row into reports_sent to mark as sent
@@ -640,6 +644,10 @@ fastify.post('/api/report/send', async (request, reply) => {
       ? formatDuration(responseData.average_response_time)
       : '--';
 
+    // Calculate peak activity and busiest hour from hourlySent/hourlyReceived
+    const peakActivityHour = hourlySent && hourlySent.length ? hourlySent.indexOf(Math.max(...hourlySent)) : undefined;
+    const busiestHour = hourlyReceived && hourlyReceived.length ? hourlyReceived.indexOf(Math.max(...hourlyReceived)) : undefined;
+
     // Send the email
     await sendEmail({
       to: toEmail,
@@ -654,8 +662,8 @@ fastify.post('/api/report/send', async (request, reply) => {
         hourlySent,
         hourlyReceived,
         currentInboxCount: stats.current_inbox_count,
-        peakActivityHour: stats.peak_activity_hour,
-        busiestHour: stats.busiest_hour,
+        peakActivityHour,
+        busiestHour,
       })
     });
 
