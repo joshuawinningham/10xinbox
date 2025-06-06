@@ -812,13 +812,16 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
         .single();
       tz = tokenRow?.time_zone || 'UTC';
     }
-    // 4. Get date range for today in user's time zone
+    // 4. Get local day start/end in user's time zone
     const now = DateTime.now().setZone(tz);
-    const start = now.startOf('day');
-    const end = start.plus({ days: 1 });
-    const after = Math.floor(start.toUTC().toSeconds());
-    const before = Math.floor(end.toUTC().toSeconds());
-    // 5. Helper to fetch all messages matching a query (handles pagination)
+    const localStart = now.startOf('day');
+    const localEnd = localStart.plus({ days: 1 });
+    // 5. Fetch a wider UTC window (midnight UTC to midnight UTC next day)
+    const utcStart = localStart.toUTC().startOf('day');
+    const utcEnd = utcStart.plus({ days: 2 });
+    const after = Math.floor(utcStart.toSeconds());
+    const before = Math.floor(utcEnd.toSeconds());
+    // 6. Helper to fetch all messages matching a query (handles pagination)
     async function fetchAllMessages(q: string) {
       let messages: any[] = [];
       let nextPageToken: string | undefined = undefined;
@@ -834,19 +837,19 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
       } while (nextPageToken);
       return messages;
     }
-    // 6. Fetch sent and received messages for today
+    // 7. Fetch sent and received messages in the wide window
     const sentMessages = await fetchAllMessages(`after:${after} before:${before} from:me`);
     const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
-    // 7. Fetch message details to get internalDate (in parallel, but limit concurrency)
+    // 8. Fetch message details to get internalDate (in parallel, but limit concurrency)
     async function fetchInternalDates(messages: any[]) {
-      const results: number[] = [];
+      const results: { ts: number, id: string }[] = [];
       const batchSize = 20;
       for (let i = 0; i < messages.length; i += batchSize) {
         const batch = messages.slice(i, i + batchSize);
         const batchResults = await Promise.all(
           batch.map(async (msg) => {
             const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-            return Number(res.data.internalDate);
+            return { ts: Number(res.data.internalDate), id: msg.id };
           })
         );
         results.push(...batchResults);
@@ -855,16 +858,20 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
     }
     const sentDates = await fetchInternalDates(sentMessages);
     const receivedDates = await fetchInternalDates(receivedMessages);
-    // 8. Aggregate by hour (local to user)
+    // 9. Filter and aggregate by local day/hour
     const sentByHour = Array(24).fill(0);
     const receivedByHour = Array(24).fill(0);
-    sentDates.forEach((ts) => {
-      const hour = DateTime.fromMillis(ts, { zone: tz }).hour;
-      sentByHour[hour]++;
+    sentDates.forEach(({ ts }) => {
+      const local = DateTime.fromMillis(ts, { zone: tz });
+      if (local >= localStart && local < localEnd) {
+        sentByHour[local.hour]++;
+      }
     });
-    receivedDates.forEach((ts) => {
-      const hour = DateTime.fromMillis(ts, { zone: tz }).hour;
-      receivedByHour[hour]++;
+    receivedDates.forEach(({ ts }) => {
+      const local = DateTime.fromMillis(ts, { zone: tz });
+      if (local >= localStart && local < localEnd) {
+        receivedByHour[local.hour]++;
+      }
     });
     return reply.send({ sent: sentByHour, received: receivedByHour });
   } catch (err: any) {
