@@ -440,6 +440,34 @@ cron.schedule('0 * * * *', async () => {
             ? formatDuration(responseData.average_response_time)
             : '--';
 
+          // Fetch all sent emails for the day
+          const safeDateStr = dateStr || '';
+          const nextDay = DateTime.fromISO(safeDateStr).plus({ days: 1 }).toISODate() || safeDateStr;
+          const { data: sentEmails, error: sentEmailsError } = await supabase
+            .from('sent_emails')
+            .select('email_id, to_name, to_email, subject, sent_at')
+            .eq('user_id', user.user_id)
+            .gte('sent_at', dateStr)
+            .lt('sent_at', nextDay);
+          if (sentEmailsError) throw sentEmailsError;
+
+          // For each sent email, count the number of open events
+          const sentEmailsWithViews = await Promise.all(
+            sentEmails.map(async (email) => {
+              const { data: opens, error: opensError } = await supabase
+                .from('email_opens')
+                .select('id')
+                .eq('user_id', user.user_id)
+                .eq('email_id', email.email_id);
+              return {
+                name: email.to_name || '',
+                email: email.to_email || '',
+                subject: email.subject || '',
+                views: opens ? opens.length : 0,
+              };
+            })
+          );
+
           // Calculate peak activity and busiest hour from hourlySent/hourlyReceived
           const peakActivityHour = hourlySent && hourlySent.length ? hourlySent.indexOf(Math.max(...hourlySent)) : undefined;
           const busiestHour = hourlyReceived && hourlyReceived.length ? hourlyReceived.indexOf(Math.max(...hourlyReceived)) : undefined;
@@ -460,6 +488,7 @@ cron.schedule('0 * * * *', async () => {
               currentInboxCount: stats.current_inbox_count,
               peakActivityHour,
               busiestHour,
+              sentEmailsWithViews,
             })
           });
           // Insert a row into reports_sent to mark as sent
@@ -644,6 +673,34 @@ fastify.post('/api/report/send', async (request, reply) => {
       ? formatDuration(responseData.average_response_time)
       : '--';
 
+    // Fetch all sent emails for the day
+    const safeDateStr = dateStr || '';
+    const nextDay = DateTime.fromISO(safeDateStr).plus({ days: 1 }).toISODate() || safeDateStr;
+    const { data: sentEmails, error: sentEmailsError } = await supabase
+      .from('sent_emails')
+      .select('email_id, to_name, to_email, subject, sent_at')
+      .eq('user_id', user_id)
+      .gte('sent_at', dateStr)
+      .lt('sent_at', nextDay);
+    if (sentEmailsError) throw sentEmailsError;
+
+    // For each sent email, count the number of open events
+    const sentEmailsWithViews = await Promise.all(
+      sentEmails.map(async (email) => {
+        const { data: opens, error: opensError } = await supabase
+          .from('email_opens')
+          .select('id')
+          .eq('user_id', user_id)
+          .eq('email_id', email.email_id);
+        return {
+          name: email.to_name || '',
+          email: email.to_email || '',
+          subject: email.subject || '',
+          views: opens ? opens.length : 0,
+        };
+      })
+    );
+
     // Calculate peak activity and busiest hour from hourlySent/hourlyReceived
     const peakActivityHour = hourlySent && hourlySent.length ? hourlySent.indexOf(Math.max(...hourlySent)) : undefined;
     const busiestHour = hourlyReceived && hourlyReceived.length ? hourlyReceived.indexOf(Math.max(...hourlyReceived)) : undefined;
@@ -664,6 +721,7 @@ fastify.post('/api/report/send', async (request, reply) => {
         currentInboxCount: stats.current_inbox_count,
         peakActivityHour,
         busiestHour,
+        sentEmailsWithViews,
       })
     });
 

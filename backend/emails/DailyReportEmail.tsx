@@ -51,6 +51,7 @@ type DailyReportEmailProps = {
   emailThreads?: number;
   averageThreadLength?: number;
   longestThread?: number;
+  sentEmailsWithViews?: Array<{ name: string; email: string; subject: string; views: number }>;
 };
 
 const baseUrl = "https://email-kpi.vercel.app";
@@ -75,6 +76,7 @@ export default function DailyReportEmail({
   emailThreads,
   averageThreadLength,
   longestThread,
+  sentEmailsWithViews,
 }: DailyReportEmailProps) {
   return (
     <Html>
@@ -210,6 +212,35 @@ export default function DailyReportEmail({
                       <tr key={i}>
                         <td style={{ padding: "12px 8px", borderBottom: i < responseTimeDistribution.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{item.range}</td>
                         <td style={{ padding: "12px 8px", textAlign: 'right', borderBottom: i < responseTimeDistribution.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{item.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          )}
+
+          {/* Sent Emails & View Counts Section */}
+          {sentEmailsWithViews && sentEmailsWithViews.length > 0 && (
+            <Section style={{ marginBottom: 32 }}>
+              <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Sent Emails & View Counts</Text>
+              <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Name</th>
+                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Email</th>
+                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Subject</th>
+                      <th style={{ padding: "8px", textAlign: 'right', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Views</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sentEmailsWithViews.map((email, i) => (
+                      <tr key={i}>
+                        <td style={{ padding: "12px 8px", borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.name}</td>
+                        <td style={{ padding: "12px 8px", borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.email}</td>
+                        <td style={{ padding: "12px 8px", borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.subject}</td>
+                        <td style={{ padding: "12px 8px", textAlign: 'right', borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.views}</td>
                       </tr>
                     ))}
                   </tbody>

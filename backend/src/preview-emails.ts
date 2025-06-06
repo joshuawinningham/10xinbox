@@ -38,7 +38,12 @@ const sampleData = {
   slowestResponseTime: '48h',
   emailThreads: 12,
   averageThreadLength: 3.5,
-  longestThread: 8
+  longestThread: 8,
+  sentEmailsWithViews: [
+    { name: 'John Doe', email: 'john@example.com', subject: 'Welcome!', views: 3 },
+    { name: 'Jane Smith', email: 'jane@example.com', subject: 'Your Invoice', views: 1 },
+    { name: 'Bob Johnson', email: 'bob@example.com', subject: 'Meeting Follow-up', views: 0 },
+  ],
 };
 
 async function generatePreviews() {

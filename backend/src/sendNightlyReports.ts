@@ -10,7 +10,6 @@ import DailyReportEmail from '../emails/DailyReportEmail';
 import React from 'react';
 import { DateTime } from 'luxon';
 import { GaxiosResponse } from 'gaxios';
-import { prisma } from "./db";
 import { sendEmail } from "./email";
 import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { formatDistanceToNow } from "date-fns";
@@ -109,13 +108,11 @@ function getResponseTimeRange(minutes: number): string {
 
 async function main() {
   try {
-    const users = await prisma.user.findMany({
-      where: {
-        email: {
-          not: null,
-        },
-      },
-    });
+    const { data: users, error } = await supabase
+      .from('gmail_tokens')
+      .select('user_id, email')
+      .not('email', 'is', null);
+    if (error) throw error;
 
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -128,178 +125,62 @@ async function main() {
       if (!user.email) continue;
 
       // Get all emails for the user from yesterday
-      const emails = await prisma.email.findMany({
-        where: {
-          userId: user.id,
-          date: {
-            gte: yesterday,
-            lt: today,
-          },
-        },
-        include: {
-          thread: true,
-        },
-        orderBy: {
-          date: "asc",
-        },
-      }) as Email[];
+      const { data: emails, error: emailsError } = await supabase
+        .from('sent_emails')
+        .select('email_id, user_id, sent_at, to_email, to_name, subject, body')
+        .eq('user_id', user.user_id)
+        .gte('sent_at', yesterday.toISOString())
+        .lt('sent_at', today.toISOString())
+        .order('sent_at', { ascending: true });
+
+      if (emailsError) throw emailsError;
 
       // Get current inbox count
-      const currentInboxCount = await prisma.email.count({
-        where: {
-          userId: user.id,
-          isRead: false,
-        },
-      });
+      const { count: currentInboxCount, error: inboxCountError } = await supabase
+        .from('sent_emails')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.user_id)
+        .eq('inbox', true);
+      if (inboxCountError) throw inboxCountError;
 
       // Calculate basic metrics
-      const emailsSent = emails.filter((e: Email) => e.direction === "sent").length;
-      const emailsReceived = emails.filter((e: Email) => e.direction === "received").length;
-
-      // Calculate response times
-      const responseTimes: number[] = [];
-      let totalResponseTime = 0;
-      let quickestResponseTime: number | null = null;
-      let slowestResponseTime: number | null = null;
-
-      for (let i = 0; i < emails.length; i++) {
-        const email = emails[i];
-        if (email.direction === "received") {
-          // Find the next sent email in the thread
-          const nextSentEmail = emails.find(
-            (e: Email) =>
-              e.direction === "sent" &&
-              e.threadId === email.threadId &&
-              e.date > email.date
-          );
-
-          if (nextSentEmail) {
-            const responseTimeMinutes = Math.round(
-              (nextSentEmail.date.getTime() - email.date.getTime()) / (1000 * 60)
-            );
-            responseTimes.push(responseTimeMinutes);
-            totalResponseTime += responseTimeMinutes;
-
-            if (quickestResponseTime === null || responseTimeMinutes < quickestResponseTime) {
-              quickestResponseTime = responseTimeMinutes;
-            }
-            if (slowestResponseTime === null || responseTimeMinutes > slowestResponseTime) {
-              slowestResponseTime = responseTimeMinutes;
-            }
-          }
-        }
-      }
-
-      // Calculate response time distribution
-      const responseTimeDistribution = responseTimes.reduce((acc, minutes) => {
-        const range = getResponseTimeRange(minutes);
-        acc[range] = (acc[range] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
-      const responseTimeDistributionArray = Object.entries(responseTimeDistribution).map(
-        ([range, count]) => ({ range, count })
-      );
-
-      // Calculate thread metrics
-      const threads = new Map<string, number>();
-      emails.forEach((email: Email) => {
-        if (email.threadId) {
-          threads.set(email.threadId, (threads.get(email.threadId) || 0) + 1);
-        }
-      });
-
-      const emailThreads = threads.size;
-      const averageThreadLength =
-        emailThreads > 0
-          ? Math.round(
-              Array.from(threads.values()).reduce((sum, count) => sum + count, 0) / emailThreads
-            )
-          : 0;
-      const longestThread = Math.max(...Array.from(threads.values()), 0);
+      const emailsSent = emails.length;
+      const emailsReceived = 0;
 
       // Calculate hourly breakdown
       const hourlySent = new Array(24).fill(0);
-      const hourlyReceived = new Array(24).fill(0);
-
-      emails.forEach((email: Email) => {
-        const hour = email.date.getHours();
-        if (email.direction === "sent") {
-          hourlySent[hour]++;
-            } else {
-          hourlyReceived[hour]++;
-            }
+      emails.forEach((email) => {
+        const hour = new Date(email.sent_at).getHours();
+        hourlySent[hour]++;
       });
+      const hourlyReceived = new Array(24).fill(0); // No received emails
 
-      // Find peak activity and busiest hours
+      // Find peak activity hour
       const peakActivityHour = hourlySent.indexOf(Math.max(...hourlySent));
-      const busiestHour = hourlyReceived.indexOf(Math.max(...hourlyReceived));
-
-      // Calculate top senders and recipients
-      const senderCounts = new Map<string, { email: string; name: string; count: number }>();
-      const recipientCounts = new Map<string, { email: string; name: string; count: number }>();
-
-      emails.forEach((email: Email) => {
-        if (email.direction === "received") {
-          const key = email.senderEmail || '';
-          const current = senderCounts.get(key) || { email: key, name: email.senderName || "", count: 0 };
-          senderCounts.set(key, { ...current, count: current.count + 1 });
-        } else {
-          const key = email.recipientEmail || '';
-          const current = recipientCounts.get(key) || { email: key, name: email.recipientName || "", count: 0 };
-          recipientCounts.set(key, { ...current, count: current.count + 1 });
-        }
-      });
-
-      const topSenders = Array.from(senderCounts.values())
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5);
-
-      const topRecipients = Array.from(recipientCounts.values())
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5);
+      const busiestHour = 0; // No received emails
 
       // Calculate inbox zero days
-      const inboxZeroDays = await prisma.inboxZeroDay.count({
-        where: {
-          userId: user.id,
-          date: {
-            gte: yesterday,
-            lt: today,
-          },
-        },
-          });
+      const { count: inboxZeroDays, error: inboxZeroDaysError } = await supabase
+        .from('inbox_zero_day')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.user_id);
+      if (inboxZeroDaysError) throw inboxZeroDaysError;
 
       // Calculate consecutive inbox zero days
-      const consecutiveInboxZeroDays = await prisma.inboxZeroDay.count({
-        where: {
-          userId: user.id,
-          date: {
-            lte: today,
-          },
-        },
-        orderBy: {
-          date: "desc",
-        },
-      });
+      const { count: consecutiveInboxZeroDays, error: consecutiveInboxZeroDaysError } = await supabase
+        .from('inbox_zero_day')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.user_id)
+        .eq('consecutive', true);
+      if (consecutiveInboxZeroDaysError) throw consecutiveInboxZeroDaysError;
 
       // Calculate business days for inbox zero
-      const businessDays = await prisma.inboxZeroDay.count({
-        where: {
-          userId: user.id,
-          date: {
-            gte: yesterday,
-            lt: today,
-          },
-          isBusinessDay: true,
-        },
-      });
-
-      // Calculate average response time
-      const avgResponseTime =
-        responseTimes.length > 0
-          ? formatDurationMinutes(Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length))
-          : "N/A";
+      const { count: businessDays, error: businessDaysError } = await supabase
+        .from('inbox_zero_day')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.user_id)
+        .eq('business_day', true);
+      if (businessDaysError) throw businessDaysError;
 
       // Send daily report
       await sendEmail({
@@ -309,22 +190,22 @@ async function main() {
           date: yesterday.toISOString(),
           emailsSent,
           emailsReceived,
-          avgResponseTime,
-          inboxZeroBusinessDays: businessDays,
-          consecutiveInboxZeroDays,
+          avgResponseTime: 'N/A',
+          inboxZeroBusinessDays: businessDays ?? 0,
+          consecutiveInboxZeroDays: consecutiveInboxZeroDays ?? 0,
           hourlySent,
           hourlyReceived,
-          topSenders,
-          topRecipients,
-          responseTimeDistribution: responseTimeDistributionArray,
+          topSenders: [],
+          topRecipients: [],
+          responseTimeDistribution: [],
           peakActivityHour,
           busiestHour,
-          totalResponseTime: Math.round(totalResponseTime / 60), // Convert to hours
-          quickestResponseTime: quickestResponseTime ? formatDurationMinutes(quickestResponseTime) : undefined,
-          slowestResponseTime: slowestResponseTime ? formatDurationMinutes(slowestResponseTime) : undefined,
-          emailThreads,
-          averageThreadLength,
-          longestThread,
+          totalResponseTime: 0,
+          quickestResponseTime: undefined,
+          slowestResponseTime: undefined,
+          emailThreads: 0,
+          averageThreadLength: 0,
+          longestThread: 0,
         }),
       });
 
@@ -336,17 +217,22 @@ async function main() {
           date: today.toISOString(),
           emailsSent,
           emailsReceived,
-          avgResponseTime,
-          inboxZeroBusinessDays: businessDays,
-          consecutiveInboxZeroDays,
+          avgResponseTime: 'N/A',
+          inboxZeroBusinessDays: businessDays ?? 0,
+          consecutiveInboxZeroDays: consecutiveInboxZeroDays ?? 0,
           hourlySent,
           hourlyReceived,
-          topSenders,
-          topRecipients,
-          responseTimeDistribution: responseTimeDistributionArray,
-          currentInboxCount,
+          topSenders: [],
+          topRecipients: [],
+          responseTimeDistribution: [],
           peakActivityHour,
           busiestHour,
+          totalResponseTime: 0,
+          quickestResponseTime: undefined,
+          slowestResponseTime: undefined,
+          emailThreads: 0,
+          averageThreadLength: 0,
+          longestThread: 0,
         }),
       });
     }
