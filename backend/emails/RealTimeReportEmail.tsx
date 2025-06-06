@@ -31,7 +31,7 @@ function formatDate(dateStr: string) {
   return `${mm}-${dd}-${yyyy}`;
 }
 
-type DailyReportEmailProps = {
+type RealTimeReportEmailProps = {
   date: string;
   emailsSent: number;
   emailsReceived: number;
@@ -51,11 +51,12 @@ type DailyReportEmailProps = {
   emailThreads?: number;
   averageThreadLength?: number;
   longestThread?: number;
+  currentInboxCount?: number;
 };
 
 const baseUrl = "https://email-kpi.com";
 
-export default function DailyReportEmail({
+export default function RealTimeReportEmail({
   date,
   emailsSent,
   emailsReceived,
@@ -75,7 +76,8 @@ export default function DailyReportEmail({
   emailThreads,
   averageThreadLength,
   longestThread,
-}: DailyReportEmailProps) {
+  currentInboxCount,
+}: RealTimeReportEmailProps) {
   return (
     <Html>
       <Head />
@@ -85,7 +87,7 @@ export default function DailyReportEmail({
           <Section style={{ textAlign: "center", marginBottom: 32 }}>
             <Img src={`${baseUrl}/logo.png`} width={64} height={64} alt="Logo" style={{ margin: "0 auto 16px" }} />
             <Text style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: -0.5, color: "#1a1a1a" }}>
-              Your Daily Email KPI Report
+              Your Real-Time Email KPI Report
             </Text>
             <Text style={{ fontSize: 16, color: "#666", margin: "8px 0 0" }}>
               {formatDate(date)}

@@ -12,6 +12,8 @@ import cors from '@fastify/cors';
 import { DateTime } from 'luxon';
 import { GaxiosResponse } from 'gaxios';
 import { v4 as uuidv4 } from 'uuid';
+import RealTimeReportEmail from "../emails/RealTimeReportEmail";
+import { sendEmail } from './email';
 
 dotenv.config({ path: '.env.local' });
 
@@ -438,9 +440,11 @@ cron.schedule('0 * * * *', async () => {
             ? formatDuration(responseData.average_response_time)
             : '--';
 
-          // Generate simple HTML report using React Email (no JSX)
-          const html = await render(
-            React.createElement(DailyReportEmail, {
+          // Send email via Resend
+          await sendEmail({
+            to: toEmail,
+            subject: 'Your Real-Time Email KPI Report',
+            react: RealTimeReportEmail({
               date: dateStr || '',
               emailsSent: stats.emails_sent,
               emailsReceived: stats.emails_received,
@@ -449,14 +453,10 @@ cron.schedule('0 * * * *', async () => {
               consecutiveInboxZeroDays,
               hourlySent,
               hourlyReceived,
+              currentInboxCount: stats.current_inbox_count,
+              peakActivityHour: stats.peak_activity_hour,
+              busiestHour: stats.busiest_hour,
             })
-          );
-          // Send email via Resend
-          await resend.emails.send({
-            from: 'onboarding@resend.dev',
-            to: toEmail,
-            subject: 'Your Daily Email KPI Report',
-            html,
           });
           // Insert a row into reports_sent to mark as sent
           await supabase.from('reports_sent').insert({ user_id: user.user_id, date: dateStr });
@@ -640,9 +640,11 @@ fastify.post('/api/report/send', async (request, reply) => {
       ? formatDuration(responseData.average_response_time)
       : '--';
 
-    // Render the report email
-    const html = await render(
-      React.createElement(DailyReportEmail, {
+    // Send the email
+    await sendEmail({
+      to: toEmail,
+      subject: 'Your Real-Time Email KPI Report',
+      react: RealTimeReportEmail({
         date: dateStr || '',
         emailsSent: stats.emails_sent,
         emailsReceived: stats.emails_received,
@@ -651,15 +653,10 @@ fastify.post('/api/report/send', async (request, reply) => {
         consecutiveInboxZeroDays,
         hourlySent,
         hourlyReceived,
+        currentInboxCount: stats.current_inbox_count,
+        peakActivityHour: stats.peak_activity_hour,
+        busiestHour: stats.busiest_hour,
       })
-    );
-
-    // Send the email
-    await resend.emails.send({
-      from: 'onboarding@resend.dev',
-      to: toEmail,
-      subject: 'Your Real-Time Email KPI Report',
-      html,
     });
 
     return reply.send({ success: true, to: toEmail });

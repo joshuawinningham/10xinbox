@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import PageHeading from '@/components/PageHeading';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 
 export default function EmailTracking() {
   const { user, loading: authLoading } = useAuth();
@@ -11,7 +12,6 @@ export default function EmailTracking() {
   const [sentEmails, setSentEmails] = useState<any[]>([]);
   const [sentLoading, setSentLoading] = useState(true);
   const [sentError, setSentError] = useState<string | null>(null);
-  const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [openEvents, setOpenEvents] = useState<any[]>([]);
   const [openEventsLoading, setOpenEventsLoading] = useState(false);
   const [openEventsError, setOpenEventsError] = useState<string | null>(null);
@@ -19,6 +19,8 @@ export default function EmailTracking() {
   const [openedEmailIds, setOpenedEmailIds] = useState<Set<string>>(new Set());
   // Map of email_id to open count
   const [openCounts, setOpenCounts] = useState<Record<string, number>>({});
+  const [popoverEmailId, setPopoverEmailId] = useState<string | null>(null);
+  const [popoverType, setPopoverType] = useState<string>('');
 
   useEffect(() => {
     if (!user) return;
@@ -80,8 +82,9 @@ export default function EmailTracking() {
     fetchOpenedEmailIdsAndCounts();
   }, [user, sentEmails.length]);
 
-  async function handleShowOpenEvents(email: any) {
-    setSelectedEmail(email);
+  async function handleShowOpenEvents(email: any, type: string = '') {
+    setPopoverEmailId(email.email_id);
+    setPopoverType(type);
     setOpenEvents([]);
     setOpenEventsLoading(true);
     setOpenEventsError(null);
@@ -102,7 +105,8 @@ export default function EmailTracking() {
   }
 
   function handleCloseOpenEvents() {
-    setSelectedEmail(null);
+    setPopoverEmailId(null);
+    setPopoverType('');
     setOpenEvents([]);
     setOpenEventsError(null);
   }
@@ -112,7 +116,7 @@ export default function EmailTracking() {
 
   return (
     <div className="max-w-screen-2xl mx-auto p-6 min-h-screen">
-      <PageHeading>Sent Emails & Open Counts</PageHeading>
+      <PageHeading>Sent Emails & View Counts</PageHeading>
       <Card className="hover:shadow-lg transition-shadow mt-8 w-full">
         <CardHeader>
           <CardTitle>Sent Emails</CardTitle>
@@ -133,26 +137,55 @@ export default function EmailTracking() {
                   <TableHead>Email</TableHead>
                   <TableHead>Subject</TableHead>
                   <TableHead>Sent At</TableHead>
-                  <TableHead>Opens</TableHead>
+                  <TableHead>Views</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sentEmails.map((email) => (
                   <TableRow key={email.email_id}>
                     <TableCell>
-                      <span title={openedEmailIds.has(email.email_id) ? "Opened" : "Not opened"} className="flex items-center gap-1">
+                      <span title={openedEmailIds.has(email.email_id) ? "Viewed" : "Not viewed"} className="flex items-center gap-1">
                         {openedEmailIds.has(email.email_id) ? (
                           <Eye className="inline w-5 h-5 text-green-600" />
                         ) : (
                           <EyeOff className="inline w-5 h-5 text-gray-400" />
                         )}
-                        <button
-                          className="ml-1 text-xs bg-gray-200 rounded px-1 font-mono hover:bg-gray-300 focus:outline-none"
-                          onClick={() => handleShowOpenEvents(email)}
-                          title="View open events"
+                        <Popover open={popoverEmailId === email.email_id && popoverType === ''} onOpenChange={(open) => { if (!open) handleCloseOpenEvents(); }}>
+                          <PopoverTrigger asChild>
+                            <span
+                              className="ml-1 text-xs bg-gray-200 rounded px-1 font-mono hover:bg-gray-300 focus:outline-none cursor-pointer"
+                              onMouseEnter={() => handleShowOpenEvents(email, '')}
+                              onFocus={() => handleShowOpenEvents(email, '')}
+                              title="View count"
                         >
                           {openCounts[email.email_id] ?? 0}
-                        </button>
+                            </span>
+                          </PopoverTrigger>
+                          <PopoverContent side="right" align="start" className="w-64" onMouseLeave={handleCloseOpenEvents}>
+                            {openEventsLoading ? (
+                              <div>Loading view events...</div>
+                            ) : openEventsError ? (
+                              <div className="text-destructive mb-4">{openEventsError.replace(/open/gi, 'view')}</div>
+                            ) : (
+                              <>
+                                <div className="font-semibold mb-2">
+                                  Email viewed {openEvents.length} {openEvents.length === 1 ? 'time' : 'times'}
+                                </div>
+                                {openEvents.length === 0 ? (
+                                  <div className="text-muted-foreground">No view events found.</div>
+                                ) : (
+                                  <ul className="divide-y">
+                                    {openEvents.map((ev, i) => (
+                                      <li key={i} className="py-2">
+                                        <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </>
+                            )}
+                          </PopoverContent>
+                        </Popover>
                       </span>
                     </TableCell>
                     <TableCell>{email.to_name || email.to_email || '—'}</TableCell>
@@ -162,12 +195,42 @@ export default function EmailTracking() {
                     <TableCell>
                       <span className="flex items-center gap-2">
                         <span className="font-mono">{openCounts[email.email_id] ?? 0}</span>
-                        <button
-                          className="text-xs px-2 py-1 rounded bg-accent hover:bg-accent/80 border border-border text-foreground"
-                          onClick={() => handleShowOpenEvents(email)}
+                        <Popover open={popoverEmailId === email.email_id && popoverType === 'details'} onOpenChange={(open) => { if (!open) handleCloseOpenEvents(); }}>
+                          <PopoverTrigger asChild>
+                            <span
+                              className="text-xs px-2 py-1 rounded bg-accent hover:bg-accent/80 border border-border text-foreground cursor-pointer"
+                              onMouseEnter={() => { handleShowOpenEvents(email, 'details'); }}
+                              onFocus={() => { handleShowOpenEvents(email, 'details'); }}
+                              title="View details"
                         >
                           View Details
-                        </button>
+                            </span>
+                          </PopoverTrigger>
+                          <PopoverContent side="right" align="start" className="w-64" onMouseLeave={handleCloseOpenEvents}>
+                            {openEventsLoading ? (
+                              <div>Loading view events...</div>
+                            ) : openEventsError ? (
+                              <div className="text-destructive mb-4">{openEventsError.replace(/open/gi, 'view')}</div>
+                            ) : (
+                              <>
+                                <div className="font-semibold mb-2">
+                                  Email viewed {openEvents.length} {openEvents.length === 1 ? 'time' : 'times'}
+                                </div>
+                                {openEvents.length === 0 ? (
+                                  <div className="text-muted-foreground">No view events found.</div>
+                                ) : (
+                                  <ul className="divide-y">
+                                    {openEvents.map((ev, i) => (
+                                      <li key={i} className="py-2">
+                                        <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </>
+                            )}
+                          </PopoverContent>
+                        </Popover>
                       </span>
                     </TableCell>
                   </TableRow>
@@ -177,35 +240,6 @@ export default function EmailTracking() {
           )}
         </CardContent>
       </Card>
-
-      {/* Open Events Modal/Drawer */}
-      {selectedEmail && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <Card className="max-w-lg w-full relative animate-in fade-in zoom-in-95">
-            <CardHeader>
-              <CardTitle>Open Events for Email</CardTitle>
-              <button className="absolute top-4 right-4 text-muted-foreground hover:text-foreground text-2xl font-bold" onClick={handleCloseOpenEvents}>&times;</button>
-            </CardHeader>
-            <CardContent>
-              {openEventsLoading ? (
-                <div>Loading open events...</div>
-              ) : openEventsError ? (
-                <div className="text-destructive mb-4">{openEventsError}</div>
-              ) : openEvents.length === 0 ? (
-                <div className="text-muted-foreground">No open events found.</div>
-              ) : (
-                <ul className="divide-y">
-                  {openEvents.map((ev, i) => (
-                    <li key={i} className="py-2">
-                      <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 } 
