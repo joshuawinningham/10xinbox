@@ -239,8 +239,16 @@ async function main() {
     process.exit(0);
   } catch (error) {
     console.error('Failed to send reports:', error);
+    console.error('Type of error:', typeof error);
     if (error instanceof Error) {
+      console.error('Error message:', error.message);
       console.error('Error stack:', error.stack);
+    } else {
+      try {
+        console.error('Error as JSON:', JSON.stringify(error));
+      } catch (e) {
+        console.error('Error could not be stringified');
+      }
     }
     process.exit(1);
   }

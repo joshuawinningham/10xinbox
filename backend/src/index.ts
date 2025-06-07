@@ -1409,6 +1409,7 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       let mime = '';
       mime += `MIME-Version: 1.0\r\n`;
       mime += `Content-Type: multipart/mixed; boundary=\"${boundary}\"\r\n`;
+      mime += `From: \"${userName}\" <${userEmail}>\r\n`;
       mime += `To: ${to}\r\n`;
       mime += `Subject: ${subject}\r\n`;
       mime += `\r\n--${boundary}\r\n`;
@@ -1431,6 +1432,7 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       const message = [
         'Content-Type: text/html; charset=utf-8',
         'MIME-Version: 1.0',
+        `From: \"${userName}\" <${userEmail}>`,
         `To: ${to}`,
         `Subject: ${subject}`,
         '',
