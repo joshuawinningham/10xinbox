@@ -14,10 +14,12 @@ import { GaxiosResponse } from 'gaxios';
 import { v4 as uuidv4 } from 'uuid';
 import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { sendEmail } from './email';
+import fastifyMultipart from '@fastify/multipart';
 
 dotenv.config({ path: '.env.local' });
 
 const fastify = Fastify({ logger: true });
+fastify.register(fastifyMultipart);
 
 // Register CORS for development
 fastify.register(cors, {
@@ -617,12 +619,16 @@ fastify.post('/api/report/send', async (request, reply) => {
       hourlySent = Array(24).fill(0);
       hourlyReceived = Array(24).fill(0);
       sentDates.forEach((ts) => {
-        const hour = DateTime.fromMillis(ts, { zone: tz }).hour;
-        hourlySent[hour]++;
+        const local = DateTime.fromMillis(ts, { zone: tz });
+        if (local >= start && local < end) {
+          hourlySent[local.hour]++;
+        }
       });
       receivedDates.forEach((ts) => {
-        const hour = DateTime.fromMillis(ts, { zone: tz }).hour;
-        hourlyReceived[hour]++;
+        const local = DateTime.fromMillis(ts, { zone: tz });
+        if (local >= start && local < end) {
+          hourlyReceived[local.hour]++;
+        }
       });
     } catch (err) {
       fastify.log.error('Failed to fetch hourly stats for email report:', err);
@@ -1337,12 +1343,34 @@ fastify.post('/api/gmail/mark-read', async (request, reply) => {
 
 // Endpoint to send an email via Gmail API
 fastify.post('/api/gmail/send', async (request, reply) => {
-  const { user_id, to, subject, body } = request.body as {
-    user_id?: string;
-    to?: string;
-    subject?: string;
-    body?: string;
-  };
+  console.log('Content-Type:', request.headers['content-type']);
+  console.log('isMultipart:', typeof request.isMultipart === 'function' ? request.isMultipart() : 'no isMultipart');
+  let user_id, to, subject, body, attachments = [];
+  if (request.isMultipart()) {
+    const parts = await request.parts();
+    const fields: Record<string, any> = {};
+    const files: any[] = [];
+    for await (const part of parts) {
+      if (part.type === 'file') {
+        const bufs = [];
+        for await (const chunk of part.file) bufs.push(chunk);
+        files.push({
+          filename: part.filename,
+          mimetype: part.mimetype,
+          buffer: Buffer.concat(bufs),
+        });
+      } else {
+        fields[part.fieldname] = part.value;
+      }
+    }
+    user_id = fields.user_id;
+    to = fields.to;
+    subject = fields.subject;
+    body = fields.body;
+    attachments = files;
+  } else {
+    ({ user_id, to, subject, body } = request.body as any);
+  }
   if (!user_id || !to || !subject || !body) {
     return reply.status(400).send({ error: 'Missing user_id, to, subject, or body' });
   }
@@ -1374,21 +1402,46 @@ fastify.post('/api/gmail/send', async (request, reply) => {
     console.log('[SEND EMAIL] email_id:', email_id);
     console.log('[SEND EMAIL] trackingPixel:', trackingPixel);
 
-    // 6. Create raw email message (RFC 5322)
-    const messageParts = [
-      `From: ${userName ? `${userName} <${userEmail}>` : userEmail}`,
-      `To: ${to}`,
-      `Subject: ${subject}`,
-      'Content-Type: text/html; charset=utf-8',
-      '',
-      bodyWithPixel,
-    ];
-    const message = messageParts.join('\r\n');
-    const encodedMessage = Buffer.from(message)
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+    // 6. Create MIME multipart message if attachments exist
+    let encodedMessage;
+    if (attachments && attachments.length > 0) {
+      const boundary = '----=_Part_' + Date.now();
+      let mime = '';
+      mime += `MIME-Version: 1.0\r\n`;
+      mime += `Content-Type: multipart/mixed; boundary=\"${boundary}\"\r\n`;
+      mime += `To: ${to}\r\n`;
+      mime += `Subject: ${subject}\r\n`;
+      mime += `\r\n--${boundary}\r\n`;
+      mime += `Content-Type: text/html; charset=utf-8\r\n\r\n`;
+      mime += bodyWithPixel + '\r\n';
+      for (const file of attachments) {
+        mime += `--${boundary}\r\n`;
+        mime += `Content-Type: ${file.mimetype || 'application/octet-stream'}; name=\"${file.filename}\"\r\n`;
+        mime += `Content-Disposition: attachment; filename=\"${file.filename}\"\r\n`;
+        mime += `Content-Transfer-Encoding: base64\r\n\r\n`;
+        mime += file.buffer.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
+      }
+      mime += `--${boundary}--`;
+      encodedMessage = Buffer.from(mime)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    } else {
+      const message = [
+        'Content-Type: text/html; charset=utf-8',
+        'MIME-Version: 1.0',
+        `To: ${to}`,
+        `Subject: ${subject}`,
+        '',
+        bodyWithPixel,
+      ].join('\r\n');
+      encodedMessage = Buffer.from(message)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
 
     // 7. Send the email
     await gmail.users.messages.send({

@@ -239,6 +239,9 @@ async function main() {
     process.exit(0);
   } catch (error) {
     console.error('Failed to send reports:', error);
+    if (error instanceof Error) {
+      console.error('Error stack:', error.stack);
+    }
     process.exit(1);
   }
 }

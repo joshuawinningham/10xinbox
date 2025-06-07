@@ -4,6 +4,8 @@ import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll,
 import { useAuth } from '@/hooks/useAuth';
 import DOMPurify from 'dompurify';
 import { Card } from '@/components/ui/card';
+import { RichTextEditor } from './RichTextEditor';
+import type { Attachment } from './RichTextEditor';
 
 const FOLDER_LABELS = [
   { name: "Inbox", label: "INBOX", icon: <Inbox className="h-4 w-4 mr-2" /> },
@@ -133,6 +135,7 @@ export default function MailDashboard() {
   const [composeToShowSuggestions, setComposeToShowSuggestions] = useState(false);
   const [composeToHighlighted, setComposeToHighlighted] = useState(-1);
   const composeToInputRef = useRef<HTMLInputElement>(null);
+  const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
@@ -253,6 +256,15 @@ export default function MailDashboard() {
     // For demo, just use sender; in real app, parse To/Cc from email headers
     return [selectedEmail.sender];
   }
+
+  const handleAddAttachment = (files: File[]) => {
+    const newAttachments = files.map(file => ({ id: Date.now() + Math.random(), file }));
+    setComposeAttachments(prev => [...prev, ...newAttachments]);
+  };
+
+  const handleRemoveAttachment = (id: number) => {
+    setComposeAttachments(prev => prev.filter(att => att.id !== id));
+  };
 
   return (
     <Card ref={cardRef} className="h-[80vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
@@ -546,15 +558,17 @@ export default function MailDashboard() {
                 setComposeError(null);
                 setComposeSuccess(false);
                 try {
+                  const formData = new FormData();
+                  formData.append('user_id', user?.id || '');
+                  formData.append('to', composeTo);
+                  formData.append('subject', composeSubject);
+                  formData.append('body', composeBody);
+                  composeAttachments.forEach(att => {
+                    formData.append('attachments', att.file, att.file.name);
+                  });
                   const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      user_id: user?.id,
-                      to: composeTo,
-                      subject: composeSubject,
-                      body: composeBody,
-                    }),
+                    body: formData,
                   });
                   const json = await res.json();
                   if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
@@ -629,12 +643,13 @@ export default function MailDashboard() {
                 value={composeSubject}
                 onChange={e => setComposeSubject(e.target.value)}
               />
-              <textarea
-                className="rounded border px-3 py-2 bg-background text-foreground min-h-[200px]"
-                placeholder="Message"
+              <RichTextEditor
                 value={composeBody}
-                onChange={e => setComposeBody(e.target.value)}
-                required
+                onChange={setComposeBody}
+                className="min-h-[200px]"
+                attachments={composeAttachments}
+                onAddAttachment={handleAddAttachment}
+                onRemoveAttachment={handleRemoveAttachment}
               />
               <div className="flex justify-end gap-2 mt-2">
                 <button type="button" className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
@@ -676,15 +691,17 @@ export default function MailDashboard() {
               setComposeError(null);
               setComposeSuccess(false);
               try {
+                const formData = new FormData();
+                formData.append('user_id', user?.id || '');
+                formData.append('to', composeTo);
+                formData.append('subject', composeSubject);
+                formData.append('body', composeBody);
+                composeAttachments.forEach(att => {
+                  formData.append('attachments', att.file, att.file.name);
+                });
                 const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    user_id: user?.id,
-                    to: composeTo,
-                    subject: composeSubject,
-                    body: composeBody,
-                  }),
+                  body: formData,
                 });
                 const json = await res.json();
                 if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
@@ -715,12 +732,13 @@ export default function MailDashboard() {
               value={composeSubject}
               onChange={e => setComposeSubject(e.target.value)}
             />
-            <textarea
-              className="rounded border px-2 py-1 bg-background text-foreground min-h-[220px] text-xs flex-1 resize-none"
-              placeholder="Message"
+            <RichTextEditor
               value={composeBody}
-              onChange={e => setComposeBody(e.target.value)}
-              required
+              onChange={setComposeBody}
+              className="min-h-[220px] text-xs"
+              attachments={composeAttachments}
+              onAddAttachment={handleAddAttachment}
+              onRemoveAttachment={handleRemoveAttachment}
             />
             <div className="flex justify-end gap-2 mt-2">
               <button type="button" className="px-3 py-1 rounded bg-muted text-foreground hover:bg-accent text-xs" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
