@@ -13,6 +13,13 @@ import { GaxiosResponse } from 'gaxios';
 import { sendEmail } from "./email";
 import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { formatDistanceToNow } from "date-fns";
+import logger from './utils/logger';
+
+// Initialize Resend client
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Add delay function at the top of the file after imports
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 interface Email {
   id: string;
@@ -39,80 +46,16 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return '--';
-  if (seconds < 60) return `${seconds}s`;
-  const min = Math.floor(seconds / 60);
-  const sec = seconds % 60;
-  if (min < 60) return `${min}m${sec > 0 ? ` ${sec}s` : ''}`;
-  const hr = Math.floor(min / 60);
-  const remMin = min % 60;
-  return `${hr}h${remMin > 0 ? ` ${remMin}m` : ''}${sec > 0 ? ` ${sec}s` : ''}`;
-}
-
-async function getValidAccessToken(user_id: string) {
-  const { data, error } = await supabase
-    .from('gmail_tokens')
-    .select('*')
-    .eq('user_id', user_id)
-    .single();
-  if (error || !data) throw new Error('No tokens found for user');
-  const { access_token, refresh_token, expires_at } = data;
-  if (new Date(expires_at) > new Date()) {
-    return access_token;
-  }
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${BASE_URL}/api/auth/google/callback`
-  );
-  oauth2Client.setCredentials({ refresh_token });
-  const { token: newAccessToken } = await oauth2Client.getAccessToken();
-  const newExpiry = oauth2Client.credentials.expiry_date;
-  await supabase
-    .from('gmail_tokens')
-    .update({
-      access_token: newAccessToken,
-      expires_at: new Date(newExpiry!).toISOString(),
-    })
-    .eq('user_id', user_id);
-  return newAccessToken;
-}
-
-// Helper to format duration as "X hours Y minutes"
-function formatDurationMinutes(minutes: number): string {
-  if (minutes < 60) {
-    return `${minutes} minutes`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  if (remainingMinutes === 0) {
-    return `${hours} hours`;
-  }
-  return `${hours} hours ${remainingMinutes} minutes`;
-}
-
-// Helper to get time range for response time distribution
-function getResponseTimeRange(minutes: number): string {
-  if (minutes < 15) return "Under 15 minutes";
-  if (minutes < 30) return "15-30 minutes";
-  if (minutes < 60) return "30-60 minutes";
-  if (minutes < 120) return "1-2 hours";
-  if (minutes < 240) return "2-4 hours";
-  if (minutes < 480) return "4-8 hours";
-  if (minutes < 1440) return "8-24 hours";
-  return "Over 24 hours";
-}
-
 async function main() {
   try {
+    logger.info('Starting nightly report generation');
     const { data: users, error } = await supabase
       .from('gmail_tokens')
       .select('user_id, email')
       .not('email', 'is', null);
     if (error) throw error;
+
+    logger.info(`Found ${users.length} users to process`);
 
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -133,19 +76,23 @@ async function main() {
         .lt('sent_at', today.toISOString())
         .order('sent_at', { ascending: true });
 
-      if (emailsError) throw emailsError;
-
-      // Get current inbox count
-      const { count: currentInboxCount, error: inboxCountError } = await supabase
-        .from('sent_emails')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.user_id)
-        .eq('inbox', true);
-      if (inboxCountError) throw inboxCountError;
+      if (emailsError) {
+        logger.error('Error fetching emails', { error: emailsError, userId: user.user_id });
+        throw emailsError;
+      }
 
       // Calculate basic metrics
       const emailsSent = emails.length;
       const emailsReceived = 0;
+
+      // Calculate inbox zero days
+      const { count: inboxZeroDays, error: inboxZeroDaysError } = await supabase
+        .from('inbox_zero_day')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.user_id)
+        .gte('date', yesterday.toISOString())
+        .lt('date', today.toISOString());
+      if (inboxZeroDaysError) throw inboxZeroDaysError;
 
       // Calculate hourly breakdown
       const hourlySent = new Array(24).fill(0);
@@ -159,19 +106,14 @@ async function main() {
       const peakActivityHour = hourlySent.indexOf(Math.max(...hourlySent));
       const busiestHour = 0; // No received emails
 
-      // Calculate inbox zero days
-      const { count: inboxZeroDays, error: inboxZeroDaysError } = await supabase
-        .from('inbox_zero_day')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.user_id);
-      if (inboxZeroDaysError) throw inboxZeroDaysError;
-
       // Calculate consecutive inbox zero days
       const { count: consecutiveInboxZeroDays, error: consecutiveInboxZeroDaysError } = await supabase
         .from('inbox_zero_day')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.user_id)
-        .eq('consecutive', true);
+        .eq('consecutive', true)
+        .gte('date', yesterday.toISOString())
+        .lt('date', today.toISOString());
       if (consecutiveInboxZeroDaysError) throw consecutiveInboxZeroDaysError;
 
       // Calculate business days for inbox zero
@@ -179,78 +121,94 @@ async function main() {
         .from('inbox_zero_day')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.user_id)
-        .eq('business_day', true);
+        .eq('business_day', true)
+        .gte('date', yesterday.toISOString())
+        .lt('date', today.toISOString());
       if (businessDaysError) throw businessDaysError;
 
       // Send daily report
-      await sendEmail({
-        to: user.email,
-        subject: `Your Daily Email KPI Report for ${yesterday.toLocaleDateString()}`,
-        react: DailyReportEmail({
-          date: yesterday.toISOString(),
-          emailsSent,
-          emailsReceived,
-          avgResponseTime: 'N/A',
-          inboxZeroBusinessDays: businessDays ?? 0,
-          consecutiveInboxZeroDays: consecutiveInboxZeroDays ?? 0,
-          hourlySent,
-          hourlyReceived,
-          topSenders: [],
-          topRecipients: [],
-          responseTimeDistribution: [],
-          peakActivityHour,
-          busiestHour,
-          totalResponseTime: 0,
-          quickestResponseTime: undefined,
-          slowestResponseTime: undefined,
-          emailThreads: 0,
-          averageThreadLength: 0,
-          longestThread: 0,
-        }),
-      });
+      await delay(1000);
+      try {
+        await sendEmail({
+          to: user.email,
+          subject: `Your Daily Email KPI Report for ${yesterday.toLocaleDateString()}`,
+          react: DailyReportEmail({
+            date: yesterday.toISOString(),
+            emailsSent,
+            emailsReceived,
+            avgResponseTime: 'N/A',
+            inboxZeroBusinessDays: businessDays ?? 0,
+            consecutiveInboxZeroDays: consecutiveInboxZeroDays ?? 0,
+            hourlySent,
+            hourlyReceived,
+            topSenders: [],
+            topRecipients: [],
+            responseTimeDistribution: [],
+            peakActivityHour,
+            busiestHour,
+            totalResponseTime: 0,
+            quickestResponseTime: undefined,
+            slowestResponseTime: undefined,
+            emailThreads: 0,
+            averageThreadLength: 0,
+            longestThread: 0,
+          }),
+        });
+        logger.info(`Successfully sent daily report to ${user.email}`);
+      } catch (error) {
+        logger.error('Failed to send daily report', { error, userId: user.user_id, email: user.email });
+      }
+
+      // Add delay before sending real-time report
+      await delay(1000);
 
       // Send real-time report
-      await sendEmail({
-        to: user.email,
-        subject: `Your Real-Time Email KPI Report for ${today.toLocaleDateString()}`,
-        react: RealTimeReportEmail({
-          date: today.toISOString(),
-          emailsSent,
-          emailsReceived,
-          avgResponseTime: 'N/A',
-          inboxZeroBusinessDays: businessDays ?? 0,
-          consecutiveInboxZeroDays: consecutiveInboxZeroDays ?? 0,
-          hourlySent,
-          hourlyReceived,
-          topSenders: [],
-          topRecipients: [],
-          responseTimeDistribution: [],
-          peakActivityHour,
-          busiestHour,
-          totalResponseTime: 0,
-          quickestResponseTime: undefined,
-          slowestResponseTime: undefined,
-          emailThreads: 0,
-          averageThreadLength: 0,
-          longestThread: 0,
-        }),
-      });
-    }
-    process.exit(0);
-  } catch (error) {
-    console.error('Failed to send reports:', error);
-    console.error('Type of error:', typeof error);
-    if (error instanceof Error) {
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-    } else {
       try {
-        console.error('Error as JSON:', JSON.stringify(error));
-      } catch (e) {
-        console.error('Error could not be stringified');
+        await sendEmail({
+          to: user.email,
+          subject: `Your Real-Time Email KPI Report for ${today.toLocaleDateString()}`,
+          react: RealTimeReportEmail({
+            date: today.toISOString(),
+            emailsSent,
+            emailsReceived,
+            avgResponseTime: 'N/A',
+            inboxZeroBusinessDays: businessDays ?? 0,
+            consecutiveInboxZeroDays: consecutiveInboxZeroDays ?? 0,
+            hourlySent,
+            hourlyReceived,
+            topSenders: [],
+            topRecipients: [],
+            responseTimeDistribution: [],
+            peakActivityHour,
+            busiestHour,
+            totalResponseTime: 0,
+            quickestResponseTime: undefined,
+            slowestResponseTime: undefined,
+            emailThreads: 0,
+            averageThreadLength: 0,
+            longestThread: 0,
+          }),
+        });
+        logger.info(`Successfully sent real-time report to ${user.email}`);
+      } catch (error) {
+        logger.error('Failed to send real-time report', { error, userId: user.user_id, email: user.email });
       }
     }
-    process.exit(1);
+    logger.info('Completed nightly report generation');
+  } catch (error) {
+    logger.error('Failed to send reports:', { error });
+    if (error instanceof Error) {
+      logger.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      });
+    } else {
+      try {
+        logger.error('Error details:', { error: JSON.stringify(error) });
+      } catch (e) {
+        logger.error('Error could not be stringified');
+      }
+    }
   }
 }
 

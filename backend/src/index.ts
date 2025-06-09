@@ -190,15 +190,15 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // 3. Get user's time zone from param or gmail_tokens
+    // 3. Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
-      const { data: tokenRow } = await supabase
-        .from('gmail_tokens')
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
         .select('time_zone')
         .eq('user_id', user_id)
         .single();
-      tz = tokenRow?.time_zone || 'UTC';
+      tz = settingsRow?.time_zone || 'UTC';
     }
 
     // 4. Get date range in user's time zone
@@ -284,7 +284,7 @@ cron.schedule('0 1 * * *', async () => {
 cron.schedule('0 * * * *', async () => {
   try {
     // Get all users with Gmail tokens (including their email and time_zone)
-    const { data: users, error: userError } = await supabase.from('gmail_tokens').select('user_id, email, time_zone');
+    const { data: users, error: userError } = await supabase.from('gmail_tokens').select('user_id, email');
     if (userError) {
       fastify.log.error('Failed to fetch users for report cron job:', userError);
       return;
@@ -292,7 +292,13 @@ cron.schedule('0 * * * *', async () => {
     const utcNow = DateTime.utc();
     for (const user of users) {
       try {
-        const tz = user.time_zone || 'UTC';
+        // Fetch time zone from user_settings
+        const { data: settingsRow } = await supabase
+          .from('user_settings')
+          .select('time_zone')
+          .eq('user_id', user.user_id)
+          .single();
+        const tz = settingsRow?.time_zone || 'UTC';
         const now2 = utcNow.setZone(tz);
         // Only send if it's midnight in user's time zone
         if (now2.hour === 0 && now2.minute === 0) {
@@ -303,11 +309,10 @@ cron.schedule('0 * * * *', async () => {
           const { data: sentRow, error: sentError } = await supabase
             .from('reports_sent')
             .select('id')
-            .eq('user_id', user.user_id)
             .eq('date', dateStr)
             .single();
           if (sentRow) {
-            fastify.log.info(`Report already sent for user ${user.user_id} on ${dateStr}, skipping.`);
+            fastify.log.info(`Report already sent for date ${dateStr}, skipping.`);
             continue;
           }
 
@@ -338,8 +343,13 @@ cron.schedule('0 * * * *', async () => {
             const oauth2Client = new google.auth.OAuth2();
             oauth2Client.setCredentials({ access_token: accessToken });
             const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-            // 3. Get user's time zone from param or gmail_tokens
-            const tz = user.time_zone || 'UTC';
+            // 3. Get user's time zone from param or user_settings
+            const { data: settingsRow } = await supabase
+              .from('user_settings')
+              .select('time_zone')
+              .eq('user_id', user.user_id)
+              .single();
+            const tz = settingsRow?.time_zone || 'UTC';
             // 4. Get date range for today in user's time zone
             const now3 = DateTime.now().setZone(tz);
             const start = now3.startOf('day');
@@ -474,7 +484,7 @@ cron.schedule('0 * * * *', async () => {
           const peakActivityHour = hourlySent && hourlySent.length ? hourlySent.indexOf(Math.max(...hourlySent)) : undefined;
           const busiestHour = hourlyReceived && hourlyReceived.length ? hourlyReceived.indexOf(Math.max(...hourlyReceived)) : undefined;
 
-          // Send email via Resend
+          console.log('sentEmailsWithViews:', sentEmailsWithViews);
           await sendEmail({
             to: toEmail,
             subject: 'Your Real-Time Email KPI Report',
@@ -494,7 +504,7 @@ cron.schedule('0 * * * *', async () => {
             })
           });
           // Insert a row into reports_sent to mark as sent
-          await supabase.from('reports_sent').insert({ user_id: user.user_id, date: dateStr });
+          await supabase.from('reports_sent').insert({ date: dateStr });
           fastify.log.info(`Sent report to ${toEmail} for user ${user.user_id} (hourly cron)`);
         }
       } catch (err) {
@@ -513,17 +523,23 @@ fastify.post('/api/report/send', async (request, reply) => {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
   try {
-    // Fetch user email and time zone from gmail_tokens
+    // Fetch user email from gmail_tokens, but time zone from user_settings
     const { data: user, error: userError } = await supabase
       .from('gmail_tokens')
-      .select('email, time_zone')
+      .select('email')
       .eq('user_id', user_id)
       .single();
     if (userError || !user?.email) {
       return reply.status(404).send({ error: 'User email not found' });
     }
     const toEmail = user.email;
-    const tz = user.time_zone || 'UTC';
+    // Fetch time zone from user_settings
+    const { data: settingsRow } = await supabase
+      .from('user_settings')
+      .select('time_zone')
+      .eq('user_id', user_id)
+      .single();
+    const tz = settingsRow?.time_zone || 'UTC';
 
     // Get today's date in user's local time zone
     const nowManual = DateTime.now().setZone(tz);
@@ -570,8 +586,13 @@ fastify.post('/api/report/send', async (request, reply) => {
       const oauth2Client = new google.auth.OAuth2();
       oauth2Client.setCredentials({ access_token: accessToken });
       const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-      // 3. Get user's time zone from param or gmail_tokens
-      const tz = user.time_zone || 'UTC';
+      // 3. Get user's time zone from param or user_settings
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
+        .select('time_zone')
+        .eq('user_id', user_id)
+        .single();
+      const tz = settingsRow?.time_zone || 'UTC';
       // 4. Get date range for today in user's time zone
       const nowManual = DateTime.now().setZone(tz);
       const start = nowManual.startOf('day');
@@ -712,6 +733,7 @@ fastify.post('/api/report/send', async (request, reply) => {
     const busiestHour = hourlyReceived && hourlyReceived.length ? hourlyReceived.indexOf(Math.max(...hourlyReceived)) : undefined;
 
     // Send the email
+    console.log('sentEmailsWithViews:', sentEmailsWithViews);
     await sendEmail({
       to: toEmail,
       subject: 'Your Real-Time Email KPI Report',
@@ -738,18 +760,22 @@ fastify.post('/api/report/send', async (request, reply) => {
   }
 });
 
-// Endpoint to set the user's time zone before OAuth
+// Endpoint to set the user's time zone
 fastify.post('/api/auth/set-timezone', async (request, reply) => {
   const { user_id, time_zone } = request.body as { user_id?: string; time_zone?: string };
   if (!user_id || !time_zone) {
+    fastify.log.error('Missing user_id or time_zone in request:', { user_id, time_zone });
     return reply.status(400).send({ error: 'Missing user_id or time_zone' });
   }
+  fastify.log.info('Setting time zone:', { user_id, time_zone });
   const { error } = await supabase
-    .from('gmail_tokens')
+    .from('user_settings')
     .upsert({ user_id, time_zone }, { onConflict: 'user_id' });
   if (error) {
+    fastify.log.error('Failed to set time zone:', error);
     return reply.status(500).send({ error: error.message });
   }
+  fastify.log.info('Successfully set time zone');
   return reply.send({ success: true });
 });
 
@@ -760,7 +786,7 @@ fastify.post('/api/auth/get-timezone', async (request, reply) => {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
   const { data, error } = await supabase
-    .from('gmail_tokens')
+    .from('user_settings')
     .select('time_zone')
     .eq('user_id', user_id)
     .single();
@@ -808,15 +834,15 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or gmail_tokens
+    // 3. Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
-      const { data: tokenRow } = await supabase
-        .from('gmail_tokens')
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
         .select('time_zone')
         .eq('user_id', user_id)
         .single();
-      tz = tokenRow?.time_zone || 'UTC';
+      tz = settingsRow?.time_zone || 'UTC';
     }
     // 4. Get local day start/end in user's time zone
     const now = DateTime.now().setZone(tz);
@@ -973,15 +999,15 @@ fastify.post('/api/gmail/top-senders', async (request, reply) => {
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or gmail_tokens
+    // 3. Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
-      const { data: tokenRow } = await supabase
-        .from('gmail_tokens')
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
         .select('time_zone')
         .eq('user_id', user_id)
         .single();
-      tz = tokenRow?.time_zone || 'UTC';
+      tz = settingsRow?.time_zone || 'UTC';
     }
     // 4. Get date range
     let start, end;
@@ -1072,15 +1098,15 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or gmail_tokens
+    // 3. Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
-      const { data: tokenRow } = await supabase
-        .from('gmail_tokens')
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
         .select('time_zone')
         .eq('user_id', user_id)
         .single();
-      tz = tokenRow?.time_zone || 'UTC';
+      tz = settingsRow?.time_zone || 'UTC';
     }
     // 4. Get date range in user's time zone
     const now = DateTime.now().setZone(tz);
@@ -1180,15 +1206,15 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or gmail_tokens
+    // 3. Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
-      const { data: tokenRow } = await supabase
-        .from('gmail_tokens')
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
         .select('time_zone')
         .eq('user_id', user_id)
         .single();
-      tz = tokenRow?.time_zone || 'UTC';
+      tz = settingsRow?.time_zone || 'UTC';
     }
     // 4. For each day, get inbox count at end of day
     const numDays = days && days > 0 && days <= 90 ? days : 30;
