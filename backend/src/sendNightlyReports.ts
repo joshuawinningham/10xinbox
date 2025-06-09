@@ -176,42 +176,6 @@ async function main() {
       } catch (error) {
         logger.error('Failed to send daily report', { error, userId: user.user_id, email: user.email });
       }
-
-      // Add delay before sending real-time report
-      await delay(1000);
-
-      // Send real-time report
-      try {
-        await sendEmail({
-          to: user.email,
-          subject: `Your Real-Time Email KPI Report for ${today.toLocaleDateString()}`,
-          react: RealTimeReportEmail({
-            date: today.toISOString(),
-            emailsSent,
-            emailsReceived,
-            avgResponseTime: 'N/A',
-            inboxZeroBusinessDays: businessDays ?? 0,
-            consecutiveInboxZeroDays: consecutiveInboxZeroDays ?? 0,
-            hourlySent,
-            hourlyReceived,
-            topSenders: [],
-            topRecipients: [],
-            responseTimeDistribution: [],
-            peakActivityHour,
-            busiestHour,
-            totalResponseTime: 0,
-            quickestResponseTime: undefined,
-            slowestResponseTime: undefined,
-            emailThreads: 0,
-            averageThreadLength: 0,
-            longestThread: 0,
-            sentEmailsWithViews,
-          }),
-        });
-        logger.info(`Successfully sent real-time report to ${user.email}`);
-      } catch (error) {
-        logger.error('Failed to send real-time report', { error, userId: user.user_id, email: user.email });
-      }
     }
     logger.info('Completed nightly report generation');
   } catch (error) {
