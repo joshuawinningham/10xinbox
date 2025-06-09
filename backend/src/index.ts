@@ -1653,6 +1653,44 @@ fastify.post('/api/contacts', async (request, reply) => {
   return reply.send(Object.values(contactsMap));
 });
 
+// Endpoint to set the user's theme
+fastify.post('/api/auth/set-theme', async (request, reply) => {
+  const { user_id, theme } = request.body as { user_id?: string; theme?: string };
+  if (!user_id || !theme) {
+    fastify.log.error('Missing user_id or theme in request:', { user_id, theme });
+    return reply.status(400).send({ error: 'Missing user_id or theme' });
+  }
+  fastify.log.info('Setting theme:', { user_id, theme });
+  const { error } = await supabase
+    .from('user_settings')
+    .upsert({ user_id, theme }, { onConflict: 'user_id' });
+  if (error) {
+    fastify.log.error('Failed to set theme:', error);
+    return reply.status(500).send({ error: error.message });
+  }
+  fastify.log.info('Successfully set theme');
+  return reply.send({ success: true });
+});
+
+// Endpoint to get the user's theme
+fastify.post('/api/auth/get-theme', async (request, reply) => {
+  const { user_id } = request.body as { user_id?: string };
+  if (!user_id) {
+    fastify.log.error('Missing user_id in get-theme request:', { user_id });
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('theme')
+    .eq('user_id', user_id)
+    .single();
+  if (error) {
+    fastify.log.error('Failed to get theme:', error);
+    return reply.status(500).send({ error: error.message });
+  }
+  return reply.send({ theme: data?.theme || 'blue' });
+});
+
 const start = async () => {
   try {
     await fastify.listen({ port: Number(process.env.PORT) || 3001, host: '0.0.0.0' });

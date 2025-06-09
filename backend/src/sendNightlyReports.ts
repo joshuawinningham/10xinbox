@@ -126,6 +126,23 @@ async function main() {
         .lt('date', today.toISOString());
       if (businessDaysError) throw businessDaysError;
 
+      // Build sentEmailsWithViews for the report
+      const sentEmailsWithViews = await Promise.all(
+        emails.map(async (email) => {
+          const { data: opens, error: opensError } = await supabase
+            .from('email_opens')
+            .select('id')
+            .eq('user_id', user.user_id)
+            .eq('email_id', email.email_id);
+          return {
+            name: email.to_name || '',
+            email: email.to_email || '',
+            subject: email.subject || '',
+            views: opens ? opens.length : 0,
+          };
+        })
+      );
+
       // Send daily report
       await delay(1000);
       try {
@@ -152,6 +169,7 @@ async function main() {
             emailThreads: 0,
             averageThreadLength: 0,
             longestThread: 0,
+            sentEmailsWithViews,
           }),
         });
         logger.info(`Successfully sent daily report to ${user.email}`);
@@ -187,6 +205,7 @@ async function main() {
             emailThreads: 0,
             averageThreadLength: 0,
             longestThread: 0,
+            sentEmailsWithViews,
           }),
         });
         logger.info(`Successfully sent real-time report to ${user.email}`);
