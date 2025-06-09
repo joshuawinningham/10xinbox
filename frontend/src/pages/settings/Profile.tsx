@@ -50,6 +50,9 @@ export default function SettingsProfile() {
   const [localSignature, setLocalSignature] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [localTimeZone, setLocalTimeZone] = useState(timeZone);
+  const [tzSaving, setTzSaving] = useState(false);
+  const [tzSaveSuccess, setTzSaveSuccess] = useState(false);
 
   // Update local signature when saved signature changes
   useEffect(() => {
@@ -62,6 +65,10 @@ export default function SettingsProfile() {
       applyTheme(theme);
     }
   }, [theme]);
+
+  useEffect(() => {
+    setLocalTimeZone(timeZone);
+  }, [timeZone]);
 
   const handleSaveSignature = async () => {
     try {
@@ -79,6 +86,19 @@ export default function SettingsProfile() {
   const handleThemeChange = (newTheme: string) => {
     updateTheme(newTheme);
     applyTheme(newTheme);
+  };
+
+  const handleSaveTimeZone = async () => {
+    try {
+      setTzSaving(true);
+      await updateTimeZone(localTimeZone);
+      setTzSaveSuccess(true);
+      setTimeout(() => setTzSaveSuccess(false), 1500);
+    } catch (err) {
+      // Optionally handle error
+    } finally {
+      setTzSaving(false);
+    }
   };
 
   return (
@@ -137,22 +157,28 @@ export default function SettingsProfile() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Select
-              value={timeZone}
-              onValueChange={updateTimeZone}
-              disabled={tzLoading}
-            >
-              <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Select time zone" />
-              </SelectTrigger>
-              <SelectContent>
-                {timezones.map((timezone) => (
-                  <SelectItem key={timezone} value={timezone}>
-                    {timezone}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Select
+                value={localTimeZone}
+                onValueChange={setLocalTimeZone}
+                disabled={tzLoading || tzSaving}
+              >
+                <SelectTrigger className="w-[280px]">
+                  <SelectValue placeholder="Select time zone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {timezones.map((timezone) => (
+                    <SelectItem key={timezone} value={timezone}>
+                      {timezone}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={handleSaveTimeZone} disabled={tzLoading || tzSaving || localTimeZone === timeZone} style={{ minWidth: 80 }}>
+                {tzSaving ? 'Saving...' : 'Save'}
+              </Button>
+              {tzSaveSuccess && <span className="text-green-600 ml-2">Saved!</span>}
+            </div>
             {tzError && <div className="text-red-500 text-xs mt-2">{tzError}</div>}
           </CardContent>
         </Card>
