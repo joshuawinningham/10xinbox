@@ -57,23 +57,34 @@ async function main() {
 
     logger.info(`Found ${users.length} users to process`);
 
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     for (const user of users) {
       if (!user.email) continue;
 
-      // Get all emails for the user from yesterday
+      // Fetch user's time zone from user_settings
+      let tz = 'UTC';
+      const { data: settingsRow, error: settingsError } = await supabase
+        .from('user_settings')
+        .select('time_zone')
+        .eq('user_id', user.user_id)
+        .single();
+      if (settingsRow && settingsRow.time_zone) {
+        tz = settingsRow.time_zone;
+      }
+      // Calculate yesterday and today in user's local time zone
+      const now = DateTime.now().setZone(tz);
+      const yesterday = now.minus({ days: 1 }).startOf('day');
+      const today = now.startOf('day');
+      const yesterdayISO = yesterday.toISO();
+      const todayISO = today.toISO();
+      const yesterdayDateStr = yesterday.toISODate();
+
+      // Get all emails for the user from yesterday (user's local time)
       const { data: emails, error: emailsError } = await supabase
         .from('sent_emails')
         .select('email_id, user_id, sent_at, to_email, to_name, subject, body')
         .eq('user_id', user.user_id)
-        .gte('sent_at', yesterday.toISOString())
-        .lt('sent_at', today.toISOString())
+        .gte('sent_at', yesterdayISO)
+        .lt('sent_at', todayISO)
         .order('sent_at', { ascending: true });
 
       if (emailsError) {
@@ -90,8 +101,8 @@ async function main() {
         .from('inbox_zero_day')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.user_id)
-        .gte('date', yesterday.toISOString())
-        .lt('date', today.toISOString());
+        .gte('date', yesterdayISO)
+        .lt('date', todayISO);
       if (inboxZeroDaysError) throw inboxZeroDaysError;
 
       // Calculate hourly breakdown
@@ -112,8 +123,8 @@ async function main() {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.user_id)
         .eq('consecutive', true)
-        .gte('date', yesterday.toISOString())
-        .lt('date', today.toISOString());
+        .gte('date', yesterdayISO)
+        .lt('date', todayISO);
       if (consecutiveInboxZeroDaysError) throw consecutiveInboxZeroDaysError;
 
       // Calculate business days for inbox zero
@@ -122,8 +133,8 @@ async function main() {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.user_id)
         .eq('business_day', true)
-        .gte('date', yesterday.toISOString())
-        .lt('date', today.toISOString());
+        .gte('date', yesterdayISO)
+        .lt('date', todayISO);
       if (businessDaysError) throw businessDaysError;
 
       // Build sentEmailsWithViews for the report
@@ -148,9 +159,9 @@ async function main() {
       try {
         await sendEmail({
           to: user.email,
-          subject: `Your Daily Email KPI Report for ${yesterday.toLocaleDateString()}`,
+          subject: `Your Daily Email KPI Report for ${yesterdayDateStr}`,
           react: DailyReportEmail({
-            date: yesterday.toISOString(),
+            date: yesterdayISO || '',
             emailsSent,
             emailsReceived,
             avgResponseTime: 'N/A',
@@ -173,6 +184,12 @@ async function main() {
           }),
         });
         logger.info(`Successfully sent daily report to ${user.email}`);
+        // Insert a row into reports_sent to mark the report as sent
+        await supabase.from('reports_sent').insert({
+          user_id: user.user_id,
+          date: yesterdayDateStr, // YYYY-MM-DD
+          sent_at: new Date().toISOString()
+        });
       } catch (error) {
         logger.error('Failed to send daily report', { error, userId: user.user_id, email: user.email });
       }
