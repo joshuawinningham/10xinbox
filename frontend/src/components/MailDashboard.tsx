@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./ui/resizable";
 import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { useSignature } from '@/hooks/useSignature';
 import DOMPurify from 'dompurify';
 import { Card } from '@/components/ui/card';
 import { RichTextEditor } from './RichTextEditor';
@@ -109,6 +110,7 @@ interface Email {
 
 export default function MailDashboard() {
   const { user } = useAuth();
+  const { signature } = useSignature();
   const [selectedFolder, setSelectedFolder] = useState(FOLDER_LABELS[0].label);
   const [emails, setEmails] = useState<Email[]>([]);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
@@ -266,6 +268,17 @@ export default function MailDashboard() {
     setComposeAttachments(prev => prev.filter(att => att.id !== id));
   };
 
+  // Add signature to compose body when opening compose window
+  const handleOpenCompose = () => {
+    setComposeOpen(true);
+    setComposeMinimized(false);
+    setComposeTo('');
+    setComposeSubject('');
+    setComposeBody(signature || ''); // Add signature to initial body
+    setComposeError(null);
+    setComposeSuccess(false);
+  };
+
   return (
     <Card ref={cardRef} className="h-[80vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
       <ResizablePanelGroup direction="horizontal" className="flex w-full h-full">
@@ -274,15 +287,7 @@ export default function MailDashboard() {
           <aside className="h-full bg-card border-r border-gray-200 p-4 flex flex-col">
             <button
               className="w-full mb-4 rounded-lg bg-primary text-primary-foreground font-semibold py-2 shadow hover:bg-primary/90 transition-colors"
-              onClick={() => {
-                setComposeOpen(true);
-                setComposeMinimized(false);
-                setComposeTo('');
-                setComposeSubject('');
-                setComposeBody('');
-                setComposeError(null);
-                setComposeSuccess(false);
-              }}
+              onClick={handleOpenCompose}
             >
               Compose
             </button>
@@ -562,7 +567,11 @@ export default function MailDashboard() {
                   formData.append('user_id', user?.id || '');
                   formData.append('to', composeTo);
                   formData.append('subject', composeSubject);
-                  formData.append('body', composeBody);
+                  // Add signature to body if it exists and isn't already in the body
+                  const bodyWithSignature = signature && !composeBody.includes(signature) 
+                    ? `${composeBody}\n\n${signature}`
+                    : composeBody;
+                  formData.append('body', bodyWithSignature);
                   composeAttachments.forEach(att => {
                     formData.append('attachments', att.file, att.file.name);
                   });
@@ -695,7 +704,11 @@ export default function MailDashboard() {
                 formData.append('user_id', user?.id || '');
                 formData.append('to', composeTo);
                 formData.append('subject', composeSubject);
-                formData.append('body', composeBody);
+                // Add signature to body if it exists and isn't already in the body
+                const bodyWithSignature = signature && !composeBody.includes(signature) 
+                  ? `${composeBody}\n\n${signature}`
+                  : composeBody;
+                formData.append('body', bodyWithSignature);
                 composeAttachments.forEach(att => {
                   formData.append('attachments', att.file, att.file.name);
                 });

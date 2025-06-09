@@ -20,7 +20,10 @@ import { useAuth } from '@/hooks/useAuth';
 import { connectGmail, disconnectGmail } from '@/lib/gmail';
 import { useGmailConnection } from '@/hooks/useGmailConnection';
 import { useTimeZone } from '@/hooks/useTimeZone';
+import { useSignature } from '@/hooks/useSignature';
+import { useTheme } from '@/hooks/useTheme';
 import { Mail } from 'lucide-react';
+import { RichTextEditor } from '@/components/RichTextEditor';
 
 const timezones = [
   "UTC",
@@ -39,18 +42,42 @@ const timezones = [
 ];
 
 export default function SettingsProfile() {
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'blue');
   const { user } = useAuth();
   const { gmailConnected, loading: gmailLoading } = useGmailConnection(user?.id);
   const { timeZone, loading: tzLoading, error: tzError, updateTimeZone } = useTimeZone();
+  const { signature: savedSignature, loading: signatureLoading, error: signatureError, updateSignature } = useSignature();
+  const { theme, error: themeError, updateTheme } = useTheme();
+  const [localSignature, setLocalSignature] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Update local signature when saved signature changes
   useEffect(() => {
-    // Apply the initial theme
-    applyTheme(theme);
-  }, []);
+    setLocalSignature(savedSignature);
+  }, [savedSignature]);
+
+  // Apply theme when it changes
+  useEffect(() => {
+    if (theme) {
+      applyTheme(theme);
+    }
+  }, [theme]);
+
+  const handleSaveSignature = async () => {
+    try {
+      setSaving(true);
+      await updateSignature(localSignature);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 1500);
+    } catch (err) {
+      console.error('Error saving signature:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleThemeChange = (newTheme: string) => {
-    setTheme(newTheme);
+    updateTheme(newTheme);
     applyTheme(newTheme);
   };
 
@@ -97,7 +124,7 @@ export default function SettingsProfile() {
                 disabled={gmailLoading || !user}
               >
                 {gmailLoading ? 'Checking...' : 'Connect Gmail'}
-            </Button>
+              </Button>
             )}
           </CardContent>
         </Card>
@@ -139,6 +166,33 @@ export default function SettingsProfile() {
           </CardHeader>
           <CardContent>
             <ThemePicker theme={theme} onThemeChange={handleThemeChange} />
+            {themeError && <div className="text-red-500 text-xs mt-2">{themeError}</div>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Email Signature</CardTitle>
+            <CardDescription>
+              This signature will be automatically added to the end of your emails. You can edit or remove it per email.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-4">
+              <RichTextEditor
+                value={localSignature}
+                onChange={setLocalSignature}
+                className="min-h-[120px]"
+                attachments={[]}
+                onAddAttachment={() => {}}
+                onRemoveAttachment={() => {}}
+              />
+            </div>
+            <Button onClick={handleSaveSignature} disabled={saving || signatureLoading}>
+              {saving ? 'Saving...' : 'Save Signature'}
+            </Button>
+            {saveSuccess && <span className="text-green-600 ml-4">Saved!</span>}
+            {signatureError && <div className="text-red-500 text-xs mt-2">{signatureError}</div>}
           </CardContent>
         </Card>
       </div>

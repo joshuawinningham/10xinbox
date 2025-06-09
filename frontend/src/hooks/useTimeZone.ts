@@ -34,17 +34,23 @@ export function useTimeZone() {
   const updateTimeZone = useCallback((newTimeZone: string) => {
     if (!user?.id) return;
     setLoading(true);
+    console.log('Updating time zone:', { userId: user.id, newTimeZone });
     fetch(`${import.meta.env.VITE_API_URL}/api/auth/set-timezone`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: user.id, time_zone: newTimeZone }),
     })
-      .then(res => res.json())
-      .then(() => {
+      .then(res => {
+        console.log('Time zone update response status:', res.status);
+        return res.json();
+      })
+      .then(data => {
+        console.log('Time zone update response:', data);
         setTimeZone(newTimeZone);
         setLoading(false);
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('Failed to update time zone:', err);
         setError('Failed to update time zone');
         setLoading(false);
       });

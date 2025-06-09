@@ -16,7 +16,4 @@ export function applyTheme(themeName: string) {
   // Set border and ring colors based on the theme
   root.style.setProperty('--border', colors.muted);
   root.style.setProperty('--ring', colors.primary);
-
-  // Store the theme preference
-  localStorage.setItem('theme', themeName);
 }
