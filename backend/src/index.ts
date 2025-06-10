@@ -1249,7 +1249,7 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
 
 // Endpoint to fetch a list of Gmail messages for a user (optionally filtered by label)
 fastify.get('/api/gmail/messages', async (request, reply) => {
-  const { user_id, label = 'INBOX', maxResults = 20, q } = request.query as { user_id?: string, label?: string, maxResults?: string, q?: string };
+  const { user_id, label = 'INBOX', maxResults = 20, q, pageToken } = request.query as { user_id?: string, label?: string, maxResults?: string, q?: string, pageToken?: string };
   if (!user_id) {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
@@ -1266,6 +1266,7 @@ fastify.get('/api/gmail/messages', async (request, reply) => {
       labelIds: [label],
       maxResults: Number(maxResults),
       q: q || undefined,
+      pageToken: pageToken || undefined,
     });
     const messages = res.data.messages || [];
     // 4. Fetch metadata for each message
@@ -1290,10 +1291,12 @@ fastify.get('/api/gmail/messages', async (request, reply) => {
         };
       })
     );
-    return reply.send({ emails: batch });
+    // Always return a valid JSON object
+    return reply.send({ emails: batch, nextPageToken: res.data.nextPageToken || null });
   } catch (err: any) {
-    fastify.log.error(err);
-    return reply.status(500).send({ error: err.message || 'Failed to fetch messages' });
+    fastify.log.error('Failed to fetch messages:', err);
+    // Always return a valid JSON object on error
+    return reply.send({ emails: [], nextPageToken: null, error: err.message || 'Failed to fetch messages' });
   }
 });
 

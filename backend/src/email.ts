@@ -17,10 +17,10 @@ export async function sendEmail({ to, subject, react }: { to: string; subject: s
     const html = await render(react);
     console.log('Email content:', html);
 
-    const { data, error } = await resend.emails.send({
-      from: 'onboarding@resend.dev',
-      to,
-      subject,
+  const { data, error } = await resend.emails.send({
+    from: 'onboarding@resend.dev',
+    to,
+    subject,
       html,
     });
     console.log('API response:', { data, error });
@@ -34,9 +34,9 @@ export async function sendEmail({ to, subject, react }: { to: string; subject: s
       errorKeys: error ? Object.keys(error) : undefined,
       dataType: data ? typeof data : undefined,
       dataKeys: data ? Object.keys(data) : undefined,
-    });
+  });
 
-    if (error) {
+  if (error) {
       logger.error('Failed to send email (detailed):', {
         error,
         to,

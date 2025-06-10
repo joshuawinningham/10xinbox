@@ -140,7 +140,8 @@ export default function MailDashboard() {
   const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
   const [pageToken, setPageToken] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageTokens, setPageTokens] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(0);
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
@@ -205,64 +206,63 @@ export default function MailDashboard() {
     );
   }, [composeTo, composeToShowSuggestions, uniqueSenders]);
 
-  useEffect(() => {
+  const fetchEmails = async (pageToken: string | null = null, selectFirst: boolean = true) => {
     if (!user) return;
     setLoading(true);
     setError(null);
     setEmails([]);
-    setSelectedEmailId(null);
-    setPageToken(null);
-    setHasMore(false);
+    if (selectFirst) setSelectedEmailId(null);
     const url = new URL(`${import.meta.env.VITE_API_URL}/api/gmail/messages`);
     url.searchParams.set('user_id', user.id);
     url.searchParams.set('label', selectedFolder);
     url.searchParams.set('maxResults', '20');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
     let searchQuery = search;
     if (showUnreadOnly) {
       searchQuery = searchQuery ? `${searchQuery} is:unread` : 'is:unread';
     }
     if (searchQuery) url.searchParams.set('q', searchQuery);
-    fetch(url.toString())
-      .then(res => res.json())
-      .then(data => {
-        setEmails(data.emails || []);
-        setPageToken(data.nextPageToken || null);
-        setHasMore(!!data.nextPageToken);
-        setLoading(false);
-        if (data.emails && data.emails.length > 0) {
-          setSelectedEmailId(data.emails[0].id);
-        }
-      })
-      .catch(() => {
-        setError('Failed to fetch emails');
-        setLoading(false);
-      });
-  }, [user, selectedFolder, search, showUnreadOnly]);
-
-  const loadMore = async () => {
-    if (!user || !pageToken || loadingMore) return;
-    setLoadingMore(true);
-    const url = new URL(`${import.meta.env.VITE_API_URL}/api/gmail/messages`);
-    url.searchParams.set('user_id', user.id);
-    url.searchParams.set('label', selectedFolder);
-    url.searchParams.set('pageToken', pageToken);
-    url.searchParams.set('maxResults', '20');
-    let searchQuery = search;
-    if (showUnreadOnly) {
-      searchQuery = searchQuery ? `${searchQuery} is:unread` : 'is:unread';
-    }
-    if (searchQuery) url.searchParams.set('q', searchQuery);
+    console.log('Fetching emails from:', url.toString());
     try {
       const res = await fetch(url.toString());
-      const data = await res.json();
-      setEmails(prev => [...prev, ...(data.emails || [])]);
+      const text = await res.text();
+      console.log('Raw response:', text);
+      const data = JSON.parse(text);
+      setEmails(data.emails || []);
       setPageToken(data.nextPageToken || null);
       setHasMore(!!data.nextPageToken);
+      setLoading(false);
+      if (data.emails && data.emails.length > 0 && selectFirst) {
+        setSelectedEmailId(data.emails[0].id);
+      }
     } catch (err) {
-      setError('Failed to load more emails');
-    } finally {
-      setLoadingMore(false);
+      console.error('Error fetching emails:', err);
+      setError('Failed to fetch emails');
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    setPageTokens(['']);
+    setCurrentPage(0);
+    fetchEmails(null, true);
+  }, [user, selectedFolder, search, showUnreadOnly]);
+
+  const handleNextPage = () => {
+    if (!hasMore || loading) return;
+    const next = pageToken;
+    if (!next) return;
+    const newStack = [...pageTokens.slice(0, currentPage + 1), next];
+    setPageTokens(newStack);
+    setCurrentPage(newStack.length - 1);
+    fetchEmails(next, true);
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage === 0 || loading) return;
+    const prevToken = pageTokens[currentPage - 1];
+    setCurrentPage(currentPage - 1);
+    fetchEmails(prevToken || null, true);
   };
 
   // Fetch full email body when selectedEmailId changes
@@ -351,23 +351,25 @@ export default function MailDashboard() {
               <h3 className="text-md font-semibold">
                 {FOLDER_LABELS.find(f => f.label === selectedFolder)?.name || selectedFolder}
               </h3>
-              <div className="flex bg-muted rounded-lg p-1">
-                <button
-                  className={`px-4 py-1 rounded-lg transition-colors ${
-                    !showUnreadOnly ? 'bg-background font-semibold shadow text-primary' : 'text-muted-foreground'
-                  }`}
-                  onClick={() => setShowUnreadOnly(false)}
-                >
-                  All mail
-                </button>
-                <button
-                  className={`px-4 py-1 rounded-lg transition-colors ${
-                    showUnreadOnly ? 'bg-background font-semibold shadow text-primary' : 'text-muted-foreground'
-                  }`}
-                  onClick={() => setShowUnreadOnly(true)}
-                >
-                  Unread
-                </button>
+              <div className="flex items-center gap-2">
+                <div className="flex bg-muted rounded-lg p-1 ml-2">
+                  <button
+                    className={`px-4 py-1 rounded-lg transition-colors ${
+                      !showUnreadOnly ? 'bg-background font-semibold shadow text-primary' : 'text-muted-foreground'
+                    }`}
+                    onClick={() => setShowUnreadOnly(false)}
+                  >
+                    All mail
+                  </button>
+                  <button
+                    className={`px-4 py-1 rounded-lg transition-colors ${
+                      showUnreadOnly ? 'bg-background font-semibold shadow text-primary' : 'text-muted-foreground'
+                    }`}
+                    onClick={() => setShowUnreadOnly(true)}
+                  >
+                    Unread
+                  </button>
+                </div>
               </div>
             </div>
             <div className="p-4 border-b border-gray-100">
@@ -489,11 +491,11 @@ export default function MailDashboard() {
               {hasMore && (
                 <li className="p-4 border-b border-border">
                   <button
-                    onClick={loadMore}
-                    disabled={loadingMore}
+                    onClick={handleNextPage}
+                    disabled={!hasMore || loading}
                     className="w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                   >
-                    {loadingMore ? 'Loading...' : 'Load More'}
+                    {loading ? 'Loading...' : 'Next'}
                   </button>
                 </li>
               )}
@@ -547,6 +549,13 @@ export default function MailDashboard() {
                   </button>
                   <button className="p-2 rounded hover:bg-accent" title="More actions">
                     <MoreVertical className="w-5 h-5" />
+                  </button>
+                  {/* Back and Forward icons */}
+                  <button className="p-2 rounded hover:bg-accent" title="Previous page" onClick={handlePrevPage} disabled={currentPage === 0 || loading}>
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                  <button className="p-2 rounded hover:bg-accent" title="Next page" onClick={handleNextPage} disabled={!hasMore || loading}>
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </button>
                 </div>
                 {/* Email Subject and Details */}
@@ -682,7 +691,6 @@ export default function MailDashboard() {
                           setComposeTo(s);
                           setComposeToShowSuggestions(false);
                           setComposeToHighlighted(-1);
-                          composeToInputRef.current?.blur();
                         }}
                       >
                         {s}
