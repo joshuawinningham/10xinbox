@@ -152,10 +152,6 @@ export function RichTextEditor({
     event.target.value = '';
   };
 
-  const handleAttachFile = () => {
-    attachInputRef.current?.click();
-  };
-
   const handleFileAttach = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files && files.length > 0) {
@@ -225,7 +221,6 @@ export function RichTextEditor({
         onRedo={handleRedo}
         onInsertLink={handleInsertLink}
         onInsertImage={handleInsertImage}
-        onAttachFile={handleAttachFile}
       />
       <input
         type="file"

@@ -11,11 +11,9 @@ import {
   AlignRight,
   Link,
   Image,
-  Code,
   Quote,
   Undo,
   Redo,
-  Paperclip,
 } from 'lucide-react';
 
 interface FormattingToolbarProps {
@@ -24,7 +22,6 @@ interface FormattingToolbarProps {
   onRedo: () => void;
   onInsertLink: () => void;
   onInsertImage: () => void;
-  onAttachFile?: () => void;
 }
 
 export function FormattingToolbar({
@@ -33,7 +30,6 @@ export function FormattingToolbar({
   onRedo,
   onInsertLink,
   onInsertImage,
-  onAttachFile,
 }: FormattingToolbarProps) {
   return (
     <div className="flex items-center gap-1 p-2 border-b bg-background">
@@ -141,14 +137,6 @@ export function FormattingToolbar({
         >
           <Quote className="h-4 w-4" />
         </Toggle>
-        <Toggle
-          size="sm"
-          pressed={false}
-          onPressedChange={() => onFormat('code')}
-          className="h-8 w-8"
-        >
-          <Code className="h-4 w-4" />
-        </Toggle>
       </div>
 
       <div className="h-6 w-px bg-border mx-1" />
@@ -178,20 +166,6 @@ export function FormattingToolbar({
         >
           <Image className="h-4 w-4" />
         </Button>
-        {onAttachFile && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={e => {
-              e.preventDefault();
-              e.stopPropagation();
-              onAttachFile();
-            }}
-            className="h-8 w-8"
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
-        )}
       </div>
     </div>
   );

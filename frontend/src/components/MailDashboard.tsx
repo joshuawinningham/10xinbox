@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./ui/resizable";
-import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical } from 'lucide-react';
+import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical, Paperclip } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSignature } from '@/hooks/useSignature';
 import DOMPurify from 'dompurify';
@@ -138,6 +138,9 @@ export default function MailDashboard() {
   const [composeToHighlighted, setComposeToHighlighted] = useState(-1);
   const composeToInputRef = useRef<HTMLInputElement>(null);
   const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
+  const [pageToken, setPageToken] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
@@ -208,9 +211,12 @@ export default function MailDashboard() {
     setError(null);
     setEmails([]);
     setSelectedEmailId(null);
+    setPageToken(null);
+    setHasMore(false);
     const url = new URL(`${import.meta.env.VITE_API_URL}/api/gmail/messages`);
     url.searchParams.set('user_id', user.id);
     url.searchParams.set('label', selectedFolder);
+    url.searchParams.set('maxResults', '20');
     let searchQuery = search;
     if (showUnreadOnly) {
       searchQuery = searchQuery ? `${searchQuery} is:unread` : 'is:unread';
@@ -220,6 +226,8 @@ export default function MailDashboard() {
       .then(res => res.json())
       .then(data => {
         setEmails(data.emails || []);
+        setPageToken(data.nextPageToken || null);
+        setHasMore(!!data.nextPageToken);
         setLoading(false);
         if (data.emails && data.emails.length > 0) {
           setSelectedEmailId(data.emails[0].id);
@@ -230,6 +238,32 @@ export default function MailDashboard() {
         setLoading(false);
       });
   }, [user, selectedFolder, search, showUnreadOnly]);
+
+  const loadMore = async () => {
+    if (!user || !pageToken || loadingMore) return;
+    setLoadingMore(true);
+    const url = new URL(`${import.meta.env.VITE_API_URL}/api/gmail/messages`);
+    url.searchParams.set('user_id', user.id);
+    url.searchParams.set('label', selectedFolder);
+    url.searchParams.set('pageToken', pageToken);
+    url.searchParams.set('maxResults', '20');
+    let searchQuery = search;
+    if (showUnreadOnly) {
+      searchQuery = searchQuery ? `${searchQuery} is:unread` : 'is:unread';
+    }
+    if (searchQuery) url.searchParams.set('q', searchQuery);
+    try {
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      setEmails(prev => [...prev, ...(data.emails || [])]);
+      setPageToken(data.nextPageToken || null);
+      setHasMore(!!data.nextPageToken);
+    } catch (err) {
+      setError('Failed to load more emails');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Fetch full email body when selectedEmailId changes
   useEffect(() => {
@@ -280,7 +314,7 @@ export default function MailDashboard() {
   };
 
   return (
-    <Card ref={cardRef} className="h-[80vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
+    <Card ref={cardRef} className="h-[90vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
       <ResizablePanelGroup direction="horizontal" className="flex w-full h-full">
         {/* Sidebar */}
         <ResizablePanel defaultSize={18} minSize={12} maxSize={28} className="flex flex-col bg-card">
@@ -443,7 +477,7 @@ export default function MailDashboard() {
                     }}
                   >
                     <div className="flex justify-between items-center">
-                      <span className={`truncate max-w-[140px] flex items-center ${isUnread ? 'font-semibold' : 'font-light text-muted-foreground'}`}> 
+                      <span className={`truncate max-w-[240px] flex items-center ${isUnread ? 'font-semibold' : 'font-light text-muted-foreground'}`}> 
                         {getSenderName(email.sender)}
                       </span>
                       <span className="text-xs text-muted-foreground">{formatEmailDate(email.date)}</span>
@@ -452,6 +486,17 @@ export default function MailDashboard() {
                   </li>
                 );
               })}
+              {hasMore && (
+                <li className="p-4 border-b border-border">
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    {loadingMore ? 'Loading...' : 'Load More'}
+                  </button>
+                </li>
+              )}
             </ul>
           </section>
         </ResizablePanel>
@@ -660,8 +705,19 @@ export default function MailDashboard() {
                 onAddAttachment={handleAddAttachment}
                 onRemoveAttachment={handleRemoveAttachment}
               />
-              <div className="flex justify-end gap-2 mt-2">
-                <button type="button" className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
+              <div className="flex flex-wrap justify-end gap-2 mt-2 w-full overflow-x-auto">
+                <button
+                  type="button"
+                  className="p-2 rounded hover:bg-accent flex items-center"
+                  title="Attach files"
+                  onClick={() => {
+                    document.querySelector<HTMLInputElement>('input[type=file][multiple]')?.click();
+                  }}
+                  disabled={composeSending}
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+                <button type="button" className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent flex items-center gap-2" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
                 <button type="submit" className="px-4 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90" disabled={composeSending}>{composeSending ? 'Sending...' : 'Send'}</button>
               </div>
               {composeSuccess && <div className="text-green-600 mt-2">Email sent!</div>}
@@ -672,9 +728,9 @@ export default function MailDashboard() {
       )}
       {/* Minimized Compose Window (not just a bar) */}
       {composeOpen && composeMinimized && (
-        <div className="absolute bottom-4 right-4 z-40 w-[600px] h-[420px] bg-white border rounded-lg shadow-lg flex flex-col animate-in fade-in zoom-in-95" style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }}>
-          <div className="flex items-center justify-between px-3 py-2 border-b bg-muted rounded-t-lg">
-            <span className="font-semibold text-primary text-sm">New Message</span>
+        <div className="absolute bottom-4 right-4 z-40 w-full max-w-2xl h-[480px] bg-white border rounded-lg shadow-lg flex flex-col animate-in fade-in zoom-in-95 min-w-0" style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }}>
+          <div className="flex items-center justify-between px-4 py-2 border-b bg-muted rounded-t-lg">
+            <span className="font-semibold text-primary">New Message</span>
             <div className="flex items-center gap-2">
               <button
                 className="p-1 rounded hover:bg-accent"
@@ -693,7 +749,7 @@ export default function MailDashboard() {
             </div>
           </div>
           <form
-            className="flex flex-col gap-2 p-4 flex-1"
+            className="flex flex-col gap-2 p-6 flex-1 min-w-0 pb-6 overflow-y-auto"
             onSubmit={async e => {
               e.preventDefault();
               setComposeSending(true);
@@ -732,15 +788,57 @@ export default function MailDashboard() {
           >
             <div className="relative">
               <input
-                className="rounded border px-2 py-1 bg-background text-foreground font-medium text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition w-full"
+                className="rounded border px-3 py-2 bg-background text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 transition w-full"
                 placeholder="To"
                 value={composeTo}
-                onChange={e => setComposeTo(e.target.value)}
+                onChange={e => {
+                  setComposeTo(e.target.value);
+                  setComposeToShowSuggestions(true);
+                  setComposeToHighlighted(-1);
+                }}
+                onFocus={() => setComposeToShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setComposeToShowSuggestions(false), 100)}
+                onKeyDown={e => {
+                  if (!composeToShowSuggestions || composeToSuggestions.length === 0) return;
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setComposeToHighlighted(prev => (prev + 1) % composeToSuggestions.length);
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setComposeToHighlighted(prev => (prev - 1 + composeToSuggestions.length) % composeToSuggestions.length);
+                  } else if (e.key === 'Enter') {
+                    if (composeToHighlighted >= 0 && composeToHighlighted < composeToSuggestions.length) {
+                      setComposeTo(composeToSuggestions[composeToHighlighted]);
+                      setComposeToShowSuggestions(false);
+                      setComposeToHighlighted(-1);
+                    }
+                  } else if (e.key === 'Escape') {
+                    setComposeToShowSuggestions(false);
+                    setComposeToHighlighted(-1);
+                  }
+                }}
                 required
               />
+              {composeToShowSuggestions && composeToSuggestions.length > 0 && (
+                <div className="absolute left-0 top-full z-50 w-full bg-white border border-gray-200 rounded shadow mt-1 max-h-60 overflow-y-auto">
+                  {composeToSuggestions.map((s, idx) => (
+                    <div
+                      key={s}
+                      className={`px-3 py-2 cursor-pointer hover:bg-gray-100 ${composeToHighlighted === idx ? 'bg-blue-100' : ''}`}
+                      onMouseDown={() => {
+                        setComposeTo(s);
+                        setComposeToShowSuggestions(false);
+                        setComposeToHighlighted(-1);
+                      }}
+                    >
+                      {s}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <input
-              className="rounded border px-2 py-1 bg-background text-foreground font-medium text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              className="rounded border px-3 py-2 bg-background text-foreground font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
               placeholder="Subject"
               value={composeSubject}
               onChange={e => setComposeSubject(e.target.value)}
@@ -748,17 +846,28 @@ export default function MailDashboard() {
             <RichTextEditor
               value={composeBody}
               onChange={setComposeBody}
-              className="min-h-[220px] text-xs"
+              className="min-h-[200px]"
               attachments={composeAttachments}
               onAddAttachment={handleAddAttachment}
               onRemoveAttachment={handleRemoveAttachment}
             />
-            <div className="flex justify-end gap-2 mt-2">
-              <button type="button" className="px-3 py-1 rounded bg-muted text-foreground hover:bg-accent text-xs" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
-              <button type="submit" className="px-3 py-1 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90 text-xs" disabled={composeSending}>{composeSending ? 'Sending...' : 'Send'}</button>
+            <div className="flex w-full justify-end gap-2 mt-2 flex-shrink-0">
+              <button
+                type="button"
+                className="p-2 rounded hover:bg-accent flex items-center"
+                title="Attach files"
+                onClick={() => {
+                  document.querySelector<HTMLInputElement>('input[type=file][multiple]')?.click();
+                }}
+                disabled={composeSending}
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+              <button type="button" className="px-4 py-2 rounded bg-muted text-foreground hover:bg-accent flex items-center gap-2" onClick={() => setComposeOpen(false)} disabled={composeSending}>Cancel</button>
+              <button type="submit" className="px-4 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90" disabled={composeSending}>{composeSending ? 'Sending...' : 'Send'}</button>
             </div>
-            {composeSuccess && <div className="text-green-600 mt-2 text-xs">Email sent!</div>}
-            {composeError && <div className="text-red-600 mt-2 text-xs">{composeError}</div>}
+            {composeSuccess && <div className="text-green-600 mt-2">Email sent!</div>}
+            {composeError && <div className="text-red-600 mt-2">{composeError}</div>}
           </form>
         </div>
       )}
