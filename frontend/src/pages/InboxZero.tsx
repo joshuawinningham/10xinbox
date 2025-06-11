@@ -92,7 +92,7 @@ export default function InboxZero() {
   ];
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-2xl p-0 pt-0 mt-0">
       <PageHeading>Inbox Zero Calendar</PageHeading>
       <p className="text-muted-foreground mb-6">See which days you achieved Inbox Zero in the current month.</p>
       <Card className="hover:shadow-lg transition-shadow mb-8">

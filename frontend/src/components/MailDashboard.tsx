@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./ui/resizable";
-import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical, Paperclip } from 'lucide-react';
+import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical, Paperclip, Pencil, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSignature } from '@/hooks/useSignature';
 import DOMPurify from 'dompurify';
@@ -142,6 +142,7 @@ export default function MailDashboard() {
   const [hasMore, setHasMore] = useState(false);
   const [pageTokens, setPageTokens] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
@@ -316,34 +317,59 @@ export default function MailDashboard() {
   return (
     <Card ref={cardRef} className="h-[90vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
       <ResizablePanelGroup direction="horizontal" className="flex w-full h-full">
-        {/* Sidebar */}
-        <ResizablePanel defaultSize={18} minSize={12} maxSize={28} className="flex flex-col bg-card">
-          <aside className="h-full bg-card border-r border-gray-200 p-4 flex flex-col">
-            <button
-              className="w-full mb-4 rounded-lg bg-primary text-primary-foreground font-semibold py-2 shadow hover:bg-primary/90 transition-colors"
-              onClick={handleOpenCompose}
-            >
-              Compose
-            </button>
-            <h2 className="text-lg font-semibold mb-4">Folders</h2>
-            <nav className="flex-1 space-y-2">
-              {FOLDER_LABELS.map((folder) => (
+        {/* Expandable Sidebar */}
+        <div className={`flex flex-col items-center bg-card border-r border-gray-200 py-4 transition-all duration-200 ${sidebarExpanded ? 'w-32' : 'w-14'} z-20`}>
+          {/* Compose Icon */}
+          <button
+            className={`mb-3 py-2 px-1 rounded-lg flex items-center justify-center transition-colors ${
+              composeOpen && !composeMinimized
+                ? 'bg-primary text-primary-foreground shadow'
+                : 'hover:bg-muted text-muted-foreground'
+            } ${sidebarExpanded ? 'w-full' : ''}`}
+            style={{
+              minWidth: 0,
+              width: sidebarExpanded ? '100%' : '2.5rem',
+              height: '2.5rem',
+              maxWidth: sidebarExpanded ? '100%' : undefined
+            }}
+            title="Compose"
+            onClick={handleOpenCompose}
+          >
+            <Pencil className="w-5 h-5" />
+            {sidebarExpanded && <span className="ml-1">Compose</span>}
+          </button>
+          {/* Folder Icons in desired order */}
+          <nav className={`flex-1 flex flex-col w-full mt-2 items-center`}>
+            {["INBOX", "SENT", "DRAFT", "SPAM", "TRASH", "ARCHIVE"].map(label => {
+              const folder = FOLDER_LABELS.find(f => f.label === label);
+              if (!folder) return null;
+              return (
                 <button
                   key={folder.label}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors border-l-4 ${
+                  className={`my-1 py-2 px-1 rounded-lg flex items-center justify-center transition-colors ${
                     selectedFolder === folder.label
-                      ? "bg-muted border-primary font-semibold text-primary"
-                      : "border-transparent hover:bg-muted/70 text-muted-foreground"
-                  }`}
+                      ? 'bg-primary text-primary-foreground shadow'
+                      : 'hover:bg-muted text-muted-foreground'
+                  } ${sidebarExpanded ? 'w-full' : ''}`}
+                  style={{ minWidth: 0, width: sidebarExpanded ? '100%' : '2.5rem', maxWidth: sidebarExpanded ? '100%' : undefined }}
+                  title={folder.name}
                   onClick={() => setSelectedFolder(folder.label)}
                 >
-                  <span className="flex items-center">{folder.icon}{folder.name}</span>
+                  {React.cloneElement(folder.icon, { className: 'w-5 h-5' })}
+                  {sidebarExpanded && <span className="ml-1">{folder.name}</span>}
                 </button>
-              ))}
-            </nav>
-          </aside>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
+              );
+            })}
+          </nav>
+          {/* Toggle Button */}
+          <button
+            className="mt-auto mb-2 p-2 rounded-full hover:bg-muted text-muted-foreground transition"
+            title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            onClick={() => setSidebarExpanded(exp => !exp)}
+          >
+            {sidebarExpanded ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+          </button>
+        </div>
         {/* Email List */}
         <ResizablePanel defaultSize={28} minSize={18} maxSize={40} className="flex flex-col bg-card">
           <section className="h-full border-r border-gray-200 overflow-y-auto">
@@ -488,17 +514,6 @@ export default function MailDashboard() {
                   </li>
                 );
               })}
-              {hasMore && (
-                <li className="p-4 border-b border-border">
-                  <button
-                    onClick={handleNextPage}
-                    disabled={!hasMore || loading}
-                    className="w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                  >
-                    {loading ? 'Loading...' : 'Next'}
-                  </button>
-                </li>
-              )}
             </ul>
           </section>
         </ResizablePanel>
@@ -508,61 +523,72 @@ export default function MailDashboard() {
           <main className="flex-1 p-6 overflow-y-auto">
             {selectedEmail ? (
               <div>
-                {/* Action Row at Top */}
-                <div className="flex items-center gap-4 mb-4">
-                  {getRecipients().length > 1 && (
+                <div className="relative">
+                  {/* Top-right pagination chevrons above subject */}
+                  <div className="absolute -top-2 -right-2 flex gap-2 p-2 z-10">
                     <button
                       className="p-2 rounded hover:bg-accent"
-                      title="Reply all"
-                      onClick={() => {
-                        setComposeOpen(true);
-                        setComposeMinimized(false);
-                        setComposeError(null);
-                        setComposeSuccess(false);
-                        if (selectedEmail) {
-                          setComposeTo(getRecipients().join(', '));
-                          setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
-                          setComposeBody('');
-                        }
-                      }}
+                      title="Previous page"
+                      onClick={handlePrevPage}
+                      disabled={currentPage === 0 || loading}
                     >
-                      <ReplyAll className="w-5 h-5" />
+                      <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </button>
-                  )}
-                  <div className="flex-1" />
-                  <button
-                    className="p-2 rounded hover:bg-accent"
-                    title="Reply"
-                    onClick={() => {
-                      setComposeOpen(true);
-                      setComposeMinimized(false);
-                      setComposeError(null);
-                      setComposeSuccess(false);
-                      if (selectedEmail) {
-                        setComposeTo(selectedEmail.sender);
-                        setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
-                        setComposeBody('');
-                      }
-                    }}
-                  >
-                    <Reply className="w-5 h-5" />
-                  </button>
-                  <button className="p-2 rounded hover:bg-accent" title="More actions">
-                    <MoreVertical className="w-5 h-5" />
-                  </button>
-                  {/* Back and Forward icons */}
-                  <button className="p-2 rounded hover:bg-accent" title="Previous page" onClick={handlePrevPage} disabled={currentPage === 0 || loading}>
-                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  </button>
-                  <button className="p-2 rounded hover:bg-accent" title="Next page" onClick={handleNextPage} disabled={!hasMore || loading}>
-                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  </button>
-                </div>
-                {/* Email Subject and Details */}
-                <h4 className="text-xl font-semibold mb-2">{selectedEmail.subject}</h4>
-                <div className="flex items-center text-sm text-gray-500 mb-4 justify-between">
-                  <span>{selectedEmail.sender}</span>
-                  <span>{formatEmailDetailDate(selectedEmail.date)}</span>
+                    <button
+                      className="p-2 rounded hover:bg-accent"
+                      title="Next page"
+                      onClick={handleNextPage}
+                      disabled={!hasMore || loading}
+                    >
+                      <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </button>
+                  </div>
+                  <h4 className="text-xl font-semibold mb-2 pt-8">{selectedEmail.subject}</h4>
+                  <div className="flex items-center text-sm text-gray-500 mb-4 justify-between">
+                    <span>{selectedEmail.sender}</span>
+                    <div className="flex items-center gap-2 ml-4">
+                      <span className="mr-2">{formatEmailDetailDate(selectedEmail.date)}</span>
+                      <button
+                        className="p-2 rounded hover:bg-accent"
+                        title="Reply"
+                        onClick={() => {
+                          setComposeOpen(true);
+                          setComposeMinimized(false);
+                          setComposeError(null);
+                          setComposeSuccess(false);
+                          if (selectedEmail) {
+                            setComposeTo(selectedEmail.sender);
+                            setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+                            setComposeBody('');
+                          }
+                        }}
+                      >
+                        <Reply className="w-5 h-5" />
+                      </button>
+                      {getRecipients().length > 1 && (
+                        <button
+                          className="p-2 rounded hover:bg-accent"
+                          title="Reply all"
+                          onClick={() => {
+                            setComposeOpen(true);
+                            setComposeMinimized(false);
+                            setComposeError(null);
+                            setComposeSuccess(false);
+                            if (selectedEmail) {
+                              setComposeTo(getRecipients().join(', '));
+                              setComposeSubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+                              setComposeBody('');
+                            }
+                          }}
+                        >
+                          <ReplyAll className="w-5 h-5" />
+                        </button>
+                      )}
+                      <button className="p-2 rounded hover:bg-accent" title="More actions">
+                        <MoreVertical className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 {bodyLoading ? (
                   <div>Loading...</div>

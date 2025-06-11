@@ -28,6 +28,7 @@ fastify.register(cors, {
 });
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -85,7 +86,7 @@ fastify.get('/api/auth/google', async (request, reply) => {
 fastify.get('/api/auth/google/callback', async (request, reply) => {
   const { code, state } = request.query as { code?: string; state?: string };
   if (!code || !state) {
-    return reply.redirect('http://localhost:5173/?gmail_error=1');
+    return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
   }
   try {
     const { tokens } = await oauth2Client.getToken(code);
@@ -109,13 +110,13 @@ fastify.get('/api/auth/google/callback', async (request, reply) => {
       });
 
     if (error) {
-      return reply.redirect('http://localhost:5173/?gmail_error=1');
+      return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
     }
 
-    return reply.redirect('http://localhost:5173/?gmail_connected=1');
+    return reply.redirect(`${FRONTEND_URL}/?gmail_connected=1`);
   } catch (err) {
     fastify.log.error(err);
-    return reply.redirect('http://localhost:5173/?gmail_error=1');
+    return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
   }
 });
 
@@ -281,7 +282,7 @@ cron.schedule('0 1 * * *', async () => {
 });
 
 // NEW: Hourly cron job to send reports at midnight in each user's time zone
-cron.schedule('0 * * * *', async () => {
+cron.schedule('0 0 * * *', async () => {
   try {
     // Get all users with Gmail tokens (including their email and time_zone)
     const { data: users, error: userError } = await supabase.from('gmail_tokens').select('user_id, email');
@@ -487,7 +488,7 @@ cron.schedule('0 * * * *', async () => {
           console.log('sentEmailsWithViews:', sentEmailsWithViews);
           await sendEmail({
             to: toEmail,
-            subject: 'Your Real-Time Email KPI Report',
+            subject: `Your Daily Email KPI Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
             react: RealTimeReportEmail({
               date: dateStr || '',
               emailsSent: stats.emails_sent,
@@ -736,7 +737,7 @@ fastify.post('/api/report/send', async (request, reply) => {
     console.log('sentEmailsWithViews:', sentEmailsWithViews);
     await sendEmail({
       to: toEmail,
-      subject: 'Your Real-Time Email KPI Report',
+      subject: `Your Daily Email KPI Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
       react: RealTimeReportEmail({
         date: dateStr || '',
         emailsSent: stats.emails_sent,

@@ -250,7 +250,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <PageHeading>Dashboard</PageHeading>
+      <PageHeading className="mt-2">Dashboard</PageHeading>
       {statsError === 'insufficient_permissions' && showPermissionBanner && (
         <div className="flex items-center gap-4 bg-yellow-100 border border-yellow-300 text-yellow-900 px-4 py-3 rounded mb-6">
           <AlertTriangle className="w-5 h-5 text-yellow-600" />

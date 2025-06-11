@@ -161,11 +161,11 @@ export default function DailyReportEmail({
           </Section>
 
           {/* Top Contacts */}
-          {(topSenders?.length || topRecipients?.length) && (
+          {((topSenders && topSenders.length > 0) || (topRecipients && topRecipients.length > 0)) && (
             <Section style={{ marginBottom: 32 }}>
               <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Top Contacts</Text>
               <Row>
-                {topSenders?.length && (
+                {topSenders && topSenders.length > 0 && (
                   <Column style={{ padding: "0 8px" }}>
                     <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
                       <Text style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a1a1a" }}>Top Senders</Text>
@@ -178,7 +178,7 @@ export default function DailyReportEmail({
                     </div>
                   </Column>
                 )}
-                {topRecipients?.length && (
+                {topRecipients && topRecipients.length > 0 && (
                   <Column style={{ padding: "0 8px" }}>
                     <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
                       <Text style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a1a1a" }}>Top Recipients</Text>
@@ -196,7 +196,7 @@ export default function DailyReportEmail({
           )}
 
           {/* Response Time Distribution */}
-          {responseTimeDistribution?.length && (
+          {responseTimeDistribution && responseTimeDistribution.length > 0 && (
             <Section style={{ marginBottom: 32 }}>
               <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Response Time Distribution</Text>
               <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>

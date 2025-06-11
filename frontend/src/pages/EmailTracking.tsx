@@ -115,7 +115,7 @@ export default function EmailTracking() {
   if (!user) return <div>Please log in to view analytics.</div>;
 
   return (
-    <div className="max-w-screen-2xl mx-auto p-6 min-h-screen">
+    <div className="max-w-screen-2xl mx-auto p-0 pt-0 mt-0 min-h-screen">
       <PageHeading>Sent Emails & View Counts</PageHeading>
       <Card className="hover:shadow-lg transition-shadow mt-8 w-full">
         <CardHeader>

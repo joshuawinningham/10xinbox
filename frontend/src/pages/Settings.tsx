@@ -35,7 +35,7 @@ const timezones = [
 export default function SettingsPage() {
   return (
     <>
-      <PageHeading>Settings</PageHeading>
+      <PageHeading className="mt-0 pt-0">Settings</PageHeading>
       
       <div className="grid gap-6">
         <Card>

@@ -7,7 +7,7 @@ export default function SettingsLayout() {
 
   return (
     <div className="space-y-6">
-      <PageHeading>Settings</PageHeading>
+      <PageHeading className="mt-0 pt-0">Settings</PageHeading>
       <div>
         <p className="text-muted-foreground mt-2">
           Manage your account settings and preferences.

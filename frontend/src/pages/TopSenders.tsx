@@ -56,7 +56,7 @@ export default function TopSenders() {
 
   return (
     <>
-      <PageHeading>Top Senders</PageHeading>
+      <PageHeading className="mt-0 pt-0">Top Senders</PageHeading>
       <div className="mx-auto max-w-screen-2xl">
         <Card className="mb-8 hover:shadow-lg transition-shadow w-full">
           <CardHeader>

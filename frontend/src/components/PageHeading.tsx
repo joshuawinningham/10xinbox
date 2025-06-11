@@ -1,8 +1,8 @@
 import React from 'react';
 
-export function PageHeading({ children }: { children: React.ReactNode }) {
+export function PageHeading({ children, className = '' }: { children: React.ReactNode, className?: string }) {
   return (
-    <h1 className="text-4xl font-bold tracking-tight mb-8">{children}</h1>
+    <h1 className={`text-2xl font-bold mb-4 ${className}`}>{children}</h1>
   );
 }
 
