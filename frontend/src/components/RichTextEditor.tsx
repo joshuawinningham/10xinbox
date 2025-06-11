@@ -8,6 +8,7 @@ interface RichTextEditorProps {
   attachments: Attachment[];
   onAddAttachment: (files: File[]) => void;
   onRemoveAttachment: (id: number) => void;
+  signature?: string;
 }
 
 export type Attachment = { id: number; file: File };
@@ -19,6 +20,7 @@ export function RichTextEditor({
   attachments,
   onAddAttachment,
   onRemoveAttachment,
+  signature,
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,6 +250,13 @@ export function RichTextEditor({
         dangerouslySetInnerHTML={{ __html: value }}
         suppressContentEditableWarning
       />
+      {signature && (
+        <div 
+          className="p-3 border-t text-muted-foreground"
+          dangerouslySetInnerHTML={{ __html: signature }}
+          suppressContentEditableWarning
+        />
+      )}
       {attachments.length > 0 && (
         <div className="mt-2 flex flex-col gap-1">
           {attachments.map(att => (

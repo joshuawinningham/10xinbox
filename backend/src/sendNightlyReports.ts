@@ -245,12 +245,17 @@ async function main() {
         })
       );
 
+      // Before sending the email, format the date safely
+      const formattedDate = yesterdayDateStr
+        ? DateTime.fromISO(yesterdayDateStr).toFormat('MM-dd-yyyy')
+        : DateTime.now().toFormat('MM-dd-yyyy');
+
       // Send daily report
       await delay(1000);
       try {
         await sendEmail({
           to: user.email,
-          subject: `Your Daily Email KPI Report for ${yesterdayDateStr}`,
+          subject: `Your Daily Email KPI Report for ${formattedDate}`,
           react: DailyReportEmail({
             date: yesterdayISO || '',
             emailsSent,

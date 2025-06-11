@@ -8,8 +8,26 @@ CREATE TABLE IF NOT EXISTS user_settings (
     updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
+-- Create email_opens table
+CREATE TABLE IF NOT EXISTS email_opens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email_id UUID NOT NULL,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    opened_at TIMESTAMPTZ NOT NULL,
+    user_agent TEXT,
+    ip TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Add indexes for better query performance
+CREATE INDEX IF NOT EXISTS email_opens_email_id_idx ON email_opens(email_id);
+CREATE INDEX IF NOT EXISTS email_opens_user_id_idx ON email_opens(user_id);
+CREATE INDEX IF NOT EXISTS email_opens_opened_at_idx ON email_opens(opened_at);
+CREATE INDEX IF NOT EXISTS email_opens_ip_user_agent_idx ON email_opens(ip, user_agent);
+
 -- Add RLS policies
 ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE email_opens ENABLE ROW LEVEL SECURITY;
 
 -- Policy to allow users to read their own settings
 CREATE POLICY "Users can read their own settings"
@@ -28,6 +46,18 @@ CREATE POLICY "Users can update their own settings"
     ON user_settings
     FOR UPDATE
     USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- Policy to allow users to read their own email opens
+CREATE POLICY "Users can read their own email opens"
+    ON email_opens
+    FOR SELECT
+    USING (auth.uid() = user_id);
+
+-- Policy to allow users to insert their own email opens
+CREATE POLICY "Users can insert their own email opens"
+    ON email_opens
+    FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
 -- Create function to update updated_at timestamp

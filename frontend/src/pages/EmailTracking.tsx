@@ -202,8 +202,8 @@ export default function EmailTracking() {
                               onMouseEnter={() => { handleShowOpenEvents(email, 'details'); }}
                               onFocus={() => { handleShowOpenEvents(email, 'details'); }}
                               title="View details"
-                        >
-                          View Details
+                            >
+                              View Details
                             </span>
                           </PopoverTrigger>
                           <PopoverContent side="right" align="start" className="w-64" onMouseLeave={handleCloseOpenEvents}>

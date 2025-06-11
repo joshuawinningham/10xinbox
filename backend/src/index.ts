@@ -281,241 +281,8 @@ cron.schedule('0 1 * * *', async () => {
   }
 });
 
-// NEW: Hourly cron job to send reports at midnight in each user's time zone
-cron.schedule('0 0 * * *', async () => {
-  try {
-    // Get all users with Gmail tokens (including their email and time_zone)
-    const { data: users, error: userError } = await supabase.from('gmail_tokens').select('user_id, email');
-    if (userError) {
-      fastify.log.error('Failed to fetch users for report cron job:', userError);
-      return;
-    }
-    const utcNow = DateTime.utc();
-    for (const user of users) {
-      try {
-        // Fetch time zone from user_settings
-        const { data: settingsRow } = await supabase
-          .from('user_settings')
-          .select('time_zone')
-          .eq('user_id', user.user_id)
-          .single();
-        const tz = settingsRow?.time_zone || 'UTC';
-        const now2 = utcNow.setZone(tz);
-        // Only send if it's midnight in user's time zone
-        if (now2.hour === 0 && now2.minute === 0) {
-          // Get previous day's date in user's time zone
-          const dateStr = now2.minus({ days: 1 }).startOf('day').toISODate();
-
-          // Check if report already sent for this user/date
-          const { data: sentRow, error: sentError } = await supabase
-            .from('reports_sent')
-            .select('id')
-            .eq('date', dateStr)
-            .single();
-          if (sentRow) {
-            fastify.log.info(`Report already sent for date ${dateStr}, skipping.`);
-            continue;
-          }
-
-          // Check if stats exist for that day
-          const { data: stats, error: statsError } = await supabase
-            .from('email_stats')
-            .select('*')
-            .eq('user_id', user.user_id)
-            .eq('date', dateStr)
-            .single();
-          if (statsError || !stats) {
-            fastify.log.error(`No stats for user ${user.user_id} on ${dateStr}`);
-            continue;
-          }
-          // Use the user's email from gmail_tokens
-          const toEmail = user.email;
-          if (!toEmail) {
-            fastify.log.error(`No email for user ${user.user_id}. Skipping email send.`);
-            continue;
-          }
-          // Fetch hourly stats for today
-          let hourlySent: number[] = [];
-          let hourlyReceived: number[] = [];
-          try {
-            // 1. Get a valid access token
-            const accessToken = await getValidAccessToken(user.user_id);
-            // 2. Set up Gmail API client
-            const oauth2Client = new google.auth.OAuth2();
-            oauth2Client.setCredentials({ access_token: accessToken });
-            const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-            // 3. Get user's time zone from param or user_settings
-            const { data: settingsRow } = await supabase
-              .from('user_settings')
-              .select('time_zone')
-              .eq('user_id', user.user_id)
-              .single();
-            const tz = settingsRow?.time_zone || 'UTC';
-            // 4. Get date range for today in user's time zone
-            const now3 = DateTime.now().setZone(tz);
-            const start = now3.startOf('day');
-            const end = start.plus({ days: 1 });
-            const after = Math.floor(start.toUTC().toSeconds());
-            const before = Math.floor(end.toUTC().toSeconds());
-            // 5. Helper to fetch all messages matching a query (handles pagination)
-            async function fetchAllMessages(q: string) {
-              let messages: any[] = [];
-              let nextPageToken: string | undefined = undefined;
-              do {
-                const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
-                  userId: 'me',
-                  q,
-                  pageToken: nextPageToken,
-                  maxResults: 500,
-                });
-                if (res.data.messages) messages = messages.concat(res.data.messages);
-                nextPageToken = res.data.nextPageToken ?? undefined;
-              } while (nextPageToken);
-              return messages;
-            }
-            // 6. Fetch sent and received messages for today
-            const sentMessages = await fetchAllMessages(`after:${after} before:${before} from:me`);
-            const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
-            // 7. Fetch message details to get internalDate (in parallel, but limit concurrency)
-            async function fetchInternalDates(messages: any[]) {
-              const results: number[] = [];
-              const batchSize = 20;
-              for (let i = 0; i < messages.length; i += batchSize) {
-                const batch = messages.slice(i, i + batchSize);
-                const batchResults = await Promise.all(
-                  batch.map(async (msg) => {
-                    const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-                    return Number(res.data.internalDate);
-                  })
-                );
-                results.push(...batchResults);
-              }
-              return results;
-            }
-            const sentDates = await fetchInternalDates(sentMessages);
-            const receivedDates = await fetchInternalDates(receivedMessages);
-            // 8. Aggregate by hour (local to user)
-            hourlySent = Array(24).fill(0);
-            hourlyReceived = Array(24).fill(0);
-            sentDates.forEach((ts) => {
-              const hour = DateTime.fromMillis(ts, { zone: tz }).hour;
-              hourlySent[hour]++;
-            });
-            receivedDates.forEach((ts) => {
-              const hour = DateTime.fromMillis(ts, { zone: tz }).hour;
-              hourlyReceived[hour]++;
-            });
-          } catch (err) {
-            fastify.log.error('Failed to fetch hourly stats for email report:', err);
-          }
-          // Fetch inbox zero history for the current month
-          const inboxZeroRes = await fetch(`${BASE_URL}/api/gmail/inbox-zero-history`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: user.user_id, time_zone: tz }),
-          });
-          const inboxZeroHistory = await inboxZeroRes.json();
-
-          // Calculate Inbox Zero Business Days
-          const now4 = DateTime.now().setZone(tz);
-          const currentYear = now4.year;
-          const currentMonth = now4.month - 1; // JS Date months are 0-based
-          const businessDays = inboxZeroHistory.filter((d: any) => {
-            const date = new Date(d.date);
-            return (
-              date.getFullYear() === currentYear &&
-              date.getMonth() === currentMonth &&
-              date.getDay() !== 0 && // not Sunday
-              date.getDay() !== 6    // not Saturday
-            );
-          });
-          const inboxZeroBusinessDays = businessDays.filter((d: any) => d.inboxCount === 0).length;
-
-          // Calculate Consecutive Inbox Zero Business Days
-          let streak = 0;
-          for (let i = businessDays.length - 1; i >= 0; i--) {
-            if (businessDays[i].inboxCount === 0) {
-              streak++;
-            } else {
-              break;
-            }
-          }
-          const consecutiveInboxZeroDays = streak;
-
-          // Calculate Avg. Response Time (for today)
-          const responseRes = await fetch(`${BASE_URL}/api/gmail/response-time`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: user.user_id, time_zone: tz, day: 'today' }),
-          });
-          const responseData = await responseRes.json();
-          const avgResponseTime = responseData.average_response_time != null
-            ? formatDuration(responseData.average_response_time)
-            : '--';
-
-          // Fetch all sent emails for the day
-          const safeDateStr = dateStr || '';
-          const nextDay = DateTime.fromISO(safeDateStr).plus({ days: 1 }).toISODate() || safeDateStr;
-          const { data: sentEmails, error: sentEmailsError } = await supabase
-            .from('sent_emails')
-            .select('email_id, to_name, to_email, subject, sent_at')
-            .eq('user_id', user.user_id)
-            .gte('sent_at', dateStr)
-            .lt('sent_at', nextDay);
-          if (sentEmailsError) throw sentEmailsError;
-
-          // For each sent email, count the number of open events
-          const sentEmailsWithViews = await Promise.all(
-            sentEmails.map(async (email) => {
-              const { data: opens, error: opensError } = await supabase
-                .from('email_opens')
-                .select('id')
-                .eq('user_id', user.user_id)
-                .eq('email_id', email.email_id);
-              return {
-                name: email.to_name || '',
-                email: email.to_email || '',
-                subject: email.subject || '',
-                views: opens ? opens.length : 0,
-              };
-            })
-          );
-
-          // Calculate peak activity and busiest hour from hourlySent/hourlyReceived
-          const peakActivityHour = hourlySent && hourlySent.length ? hourlySent.indexOf(Math.max(...hourlySent)) : undefined;
-          const busiestHour = hourlyReceived && hourlyReceived.length ? hourlyReceived.indexOf(Math.max(...hourlyReceived)) : undefined;
-
-          console.log('sentEmailsWithViews:', sentEmailsWithViews);
-          await sendEmail({
-            to: toEmail,
-            subject: `Your Daily Email KPI Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
-            react: RealTimeReportEmail({
-              date: dateStr || '',
-              emailsSent: stats.emails_sent,
-              emailsReceived: stats.emails_received,
-              avgResponseTime,
-              inboxZeroBusinessDays,
-              consecutiveInboxZeroDays,
-              hourlySent,
-              hourlyReceived,
-              currentInboxCount: stats.current_inbox_count,
-              peakActivityHour,
-              busiestHour,
-              sentEmailsWithViews,
-            })
-          });
-          // Insert a row into reports_sent to mark as sent
-          await supabase.from('reports_sent').insert({ date: dateStr });
-          fastify.log.info(`Sent report to ${toEmail} for user ${user.user_id} (hourly cron)`);
-        }
-      } catch (err) {
-        fastify.log.error(`Failed to send report for user ${user.user_id}:`, err);
-      }
-    }
-  } catch (err) {
-    fastify.log.error('Hourly report cron job error:', err);
-  }
-});
+// Note: Daily email reports are now handled by the dedicated nightly report script (sendNightlyReports.ts)
+// which runs once per day at midnight in each user's time zone.
 
 // Endpoint to manually send the daily report to a user (for testing or on-demand)
 fastify.post('/api/report/send', async (request, reply) => {
@@ -1614,12 +1381,38 @@ fastify.get('/track/open', async (request, reply) => {
       'base64'
     );
   }
+
+  const userAgent = request.headers['user-agent'] || '';
+
+  // Skip known bot/preview user agents
+  const botPatterns = [
+    /googleimageproxy/i,
+    /outlook/i,
+    /apple-mail/i,
+    /thunderbird/i,
+    /mozilla\/5\.0.*applewebkit.*safari/i,
+    /bot/i,
+    /crawler/i,
+    /spider/i,
+    /preview/i,
+    /security scan/i
+  ];
+
+  if (botPatterns.some(pattern => pattern.test(userAgent))) {
+    console.log('Skipping bot/preview open:', { email_id, userAgent });
+    reply.header('Content-Type', 'image/gif');
+    return Buffer.from(
+      'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+      'base64'
+    );
+  }
+
   // Log the open event in Supabase
   const { data, error } = await supabase.from('email_opens').insert({
     email_id,
     user_id,
     opened_at: new Date().toISOString(),
-    user_agent: request.headers['user-agent'] || '',
+    userAgent
   });
   console.log('Supabase insert result:', { data, error });
   reply.header('Content-Type', 'image/gif');

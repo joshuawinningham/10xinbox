@@ -309,7 +309,7 @@ export default function MailDashboard() {
     setComposeMinimized(false);
     setComposeTo('');
     setComposeSubject('');
-    setComposeBody(signature || ''); // Add signature to initial body
+    setComposeBody(''); // Set empty initial body
     setComposeError(null);
     setComposeSuccess(false);
   };
@@ -738,6 +738,7 @@ export default function MailDashboard() {
                 attachments={composeAttachments}
                 onAddAttachment={handleAddAttachment}
                 onRemoveAttachment={handleRemoveAttachment}
+                signature={signature}
               />
               <div className="flex flex-wrap justify-end gap-2 mt-2 w-full overflow-x-auto">
                 <button
@@ -884,6 +885,7 @@ export default function MailDashboard() {
               attachments={composeAttachments}
               onAddAttachment={handleAddAttachment}
               onRemoveAttachment={handleRemoveAttachment}
+              signature={signature}
             />
             <div className="flex w-full justify-end gap-2 mt-2 flex-shrink-0">
               <button
