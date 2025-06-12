@@ -1192,8 +1192,14 @@ fastify.post('/api/gmail/send', async (request, reply) => {
 
     // 4. Generate a unique email_id for tracking
     const email_id = uuidv4();
-    // 5. Append tracking pixel to the body
-    const trackingPixel = `<img src="${BASE_URL}/track/open?email_id=${email_id}&user_id=${user_id}" width="1" height="1" style="display:none;" />`;
+    // 5. Append tracking pixel to the body with additional styling and alt text
+    const trackingPixel = `
+      <div style="display:none;max-height:0px;overflow:hidden;">
+        <img src="${BASE_URL}/track/open?email_id=${email_id}&user_id=${user_id}" 
+             width="1" height="1" 
+             alt="Email tracking pixel"
+             style="display:none;width:1px;height:1px;opacity:0;color:transparent;" />
+      </div>`;
     const bodyWithPixel = body + trackingPixel;
     // LOGGING: Show the email_id and tracking pixel
     console.log('[SEND EMAIL] email_id:', email_id);
@@ -1373,7 +1379,19 @@ fastify.post('/api/email-tracking/open-events', async (request, reply) => {
 // --- Tracking Pixel: Email Open Tracking ---
 fastify.get('/track/open', async (request, reply) => {
   const { email_id, user_id } = request.query as { email_id?: string; user_id?: string };
+  
+  // Log all request details for debugging
+  console.log('[TRACKING] Request received:', {
+    email_id,
+    user_id,
+    headers: request.headers,
+    url: request.url,
+    method: request.method,
+    ip: request.ip
+  });
+
   if (!email_id || !user_id) {
+    console.log('[TRACKING] Missing parameters:', { email_id, user_id });
     // Always return a 1x1 GIF, even if params are missing, to avoid breaking emails
     reply.header('Content-Type', 'image/gif');
     return Buffer.from(
@@ -1399,7 +1417,7 @@ fastify.get('/track/open', async (request, reply) => {
   ];
 
   if (botPatterns.some(pattern => pattern.test(userAgent))) {
-    console.log('Skipping bot/preview open:', { email_id, userAgent });
+    console.log('[TRACKING] Skipping bot/preview open:', { email_id, userAgent });
     reply.header('Content-Type', 'image/gif');
     return Buffer.from(
       'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
@@ -1412,9 +1430,11 @@ fastify.get('/track/open', async (request, reply) => {
     email_id,
     user_id,
     opened_at: new Date().toISOString(),
-    userAgent
+    userAgent,
+    ip: request.ip
   });
-  console.log('Supabase insert result:', { data, error });
+  console.log('[TRACKING] Supabase insert result:', { data, error });
+  
   reply.header('Content-Type', 'image/gif');
   return Buffer.from(
     'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
