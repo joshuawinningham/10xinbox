@@ -205,8 +205,11 @@ async function main() {
           const receivedDates = await fetchInternalDates(receivedMessages);
           // 6. Aggregate by hour (local to user)
           receivedDates.forEach((ts) => {
-            const hour = DateTime.fromMillis(ts, { zone: tz }).hour;
-            hourlyReceived[hour]++;
+            // Convert UTC timestamp to user's local timezone
+            const localTime = DateTime.fromMillis(ts).setZone(tz);
+            if (localTime.isValid) {
+              hourlyReceived[localTime.hour]++;
+            }
           });
         }
       } catch (err) {
@@ -216,13 +219,16 @@ async function main() {
       // Calculate hourly breakdown
       const hourlySent = new Array(24).fill(0);
       emails.forEach((email) => {
-        const hour = new Date(email.sent_at).getHours();
-        hourlySent[hour]++;
+        // Convert sent_at to user's local timezone
+        const localTime = DateTime.fromISO(email.sent_at).setZone(tz);
+        if (localTime.isValid) {
+          hourlySent[localTime.hour]++;
+        }
       });
 
       // Find peak activity hour
       const peakActivityHour = hourlySent.indexOf(Math.max(...hourlySent));
-      const busiestHour = 0; // No received emails
+      const busiestHour = hourlyReceived.indexOf(Math.max(...hourlyReceived));
 
       // Fetch avg. response time for the previous day
       let avgResponseTime = 'N/A';

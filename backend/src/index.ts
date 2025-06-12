@@ -504,7 +504,7 @@ fastify.post('/api/report/send', async (request, reply) => {
     console.log('sentEmailsWithViews:', sentEmailsWithViews);
     await sendEmail({
       to: toEmail,
-      subject: `Your Daily Email KPI Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
+      subject: `Your Real-Time Email KPI Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
       react: RealTimeReportEmail({
         date: dateStr || '',
         emailsSent: stats.emails_sent,
