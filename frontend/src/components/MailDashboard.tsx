@@ -143,6 +143,7 @@ export default function MailDashboard() {
   const [pageTokens, setPageTokens] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [contacts, setContacts] = useState<Array<{ name: string; email: string }>>([]);
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
@@ -194,18 +195,40 @@ export default function MailDashboard() {
     }
   }
 
+  // Fetch contacts when user changes
+  useEffect(() => {
+    if (!user) return;
+    fetch(`${import.meta.env.VITE_API_URL}/api/contacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.id }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        setContacts(data);
+      })
+      .catch(err => {
+        console.error('Failed to fetch contacts:', err);
+      });
+  }, [user]);
+
   // Filter suggestions as user types in To field
   useEffect(() => {
     if (!composeToShowSuggestions) return;
     const input = composeTo.trim().toLowerCase();
     if (!input) {
-      setComposeToSuggestions(uniqueSenders);
+      setComposeToSuggestions(contacts.map(c => `${c.name} <${c.email}>`));
       return;
     }
     setComposeToSuggestions(
-      uniqueSenders.filter(s => s.toLowerCase().includes(input))
+      contacts
+        .filter(c => 
+          c.name.toLowerCase().includes(input) || 
+          c.email.toLowerCase().includes(input)
+        )
+        .map(c => `${c.name} <${c.email}>`)
     );
-  }, [composeTo, composeToShowSuggestions, uniqueSenders]);
+  }, [composeTo, composeToShowSuggestions, contacts]);
 
   const fetchEmails = async (pageToken: string | null = null, selectFirst: boolean = true) => {
     if (!user) return;

@@ -1427,27 +1427,84 @@ fastify.post('/api/contacts', async (request, reply) => {
   const { user_id } = request.body as { user_id?: string };
   if (!user_id) return reply.status(400).send({ error: 'Missing user_id' });
 
-  // Get all sent emails for this user
-  const { data, error } = await supabase
-    .from('sent_emails')
-    .select('to_name, to_email')
-    .eq('user_id', user_id);
+  try {
+    // Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
 
-  if (error) return reply.status(500).send({ error: error.message });
+    // Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-  // Build unique contacts list
-  const contactsMap: Record<string, { name: string; email: string }> = {};
-  (data || []).forEach(row => {
-    if (row.to_email) {
-      contactsMap[row.to_email] = {
-        name: row.to_name || row.to_email,
-        email: row.to_email,
-      };
+    // Get all sent emails for this user from our database
+    const { data: sentData, error: sentError } = await supabase
+      .from('sent_emails')
+      .select('to_name, to_email')
+      .eq('user_id', user_id);
+
+    if (sentError) return reply.status(500).send({ error: sentError.message });
+
+    // Get received emails from Gmail
+    const receivedRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'label:INBOX -from:me',
+      maxResults: 100, // Limit to last 100 received emails for performance
+    });
+
+    // Build unique contacts list
+    const contactsMap: Record<string, { name: string; email: string }> = {};
+
+    // Add sent email contacts
+    (sentData || []).forEach(row => {
+      if (row.to_email) {
+        contactsMap[row.to_email] = {
+          name: row.to_name || row.to_email,
+          email: row.to_email,
+        };
+      }
+    });
+
+    // Add received email contacts
+    if (receivedRes.data.messages) {
+      const messageDetails = await Promise.all(
+        receivedRes.data.messages.map(async (message) => {
+          const details = await gmail.users.messages.get({
+            userId: 'me',
+            id: message.id!,
+            format: 'metadata',
+            metadataHeaders: ['From'],
+          });
+          return details.data.payload?.headers?.find(h => h.name === 'From')?.value;
+        })
+      );
+
+      messageDetails.forEach(from => {
+        if (from) {
+          // Parse "Name <email@example.com>" format
+          const match = from.match(/^(.*?)\s*<([^>]+)>$/);
+          if (match) {
+            const [, name, email] = match;
+            contactsMap[email] = {
+              name: name.trim() || email,
+              email: email,
+            };
+          } else {
+            // If no name provided, use email as both
+            contactsMap[from] = {
+              name: from,
+              email: from,
+            };
+          }
+        }
+      });
     }
-  });
 
-  // Return as array
-  return reply.send(Object.values(contactsMap));
+    // Return as array
+    return reply.send(Object.values(contactsMap));
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to fetch contacts' });
+  }
 });
 
 // Endpoint to set the user's theme
