@@ -78,6 +78,18 @@ async function main() {
       const todayISO = today.toISO();
       const yesterdayDateStr = yesterday.toISODate();
 
+      // Check if report already sent for this user/date
+      const { data: sentRow, error: sentError } = await supabase
+        .from('reports_sent')
+        .select('id')
+        .eq('user_id', user.user_id)
+        .eq('date', yesterdayDateStr)
+        .single();
+      if (sentRow) {
+        logger.info(`Report already sent for user ${user.user_id} on ${yesterdayDateStr}, skipping.`);
+        continue;
+      }
+
       // Get all emails for the user from yesterday (user's local time)
       const { data: emails, error: emailsError } = await supabase
         .from('sent_emails')
