@@ -1192,18 +1192,41 @@ fastify.post('/api/gmail/send', async (request, reply) => {
 
     // 4. Generate a unique email_id for tracking
     const email_id = uuidv4();
+    
+    // Validate BASE_URL
+    if (!BASE_URL) {
+      console.error('[SEND EMAIL] BASE_URL is not set!');
+      throw new Error('BASE_URL environment variable is required for email tracking');
+    }
+
     // 5. Append tracking pixel to the body with additional styling and alt text
+    const trackingUrl = `${BASE_URL}/track/open?email_id=${email_id}&user_id=${user_id}`;
     const trackingPixel = `
-      <div style="display:none;max-height:0px;overflow:hidden;">
-        <img src="${BASE_URL}/track/open?email_id=${email_id}&user_id=${user_id}" 
+      <!-- Email tracking pixel -->
+      <div style="display:none;max-height:0px;overflow:hidden;mso-hide:all;">
+        <img src="${trackingUrl}" 
              width="1" height="1" 
              alt="Email tracking pixel"
-             style="display:none;width:1px;height:1px;opacity:0;color:transparent;" />
+             style="display:none;width:1px;height:1px;opacity:0;color:transparent;mso-hide:all;"
+             referrerpolicy="no-referrer-when-downgrade"
+             crossorigin="anonymous"
+             loading="lazy"
+             decoding="async" />
       </div>`;
+
+    // Validate tracking pixel
+    if (!trackingPixel.includes(email_id) || !trackingPixel.includes(user_id)) {
+      console.error('[SEND EMAIL] Invalid tracking pixel generated:', { email_id, user_id, trackingPixel });
+      throw new Error('Failed to generate valid tracking pixel');
+    }
+
     const bodyWithPixel = body + trackingPixel;
+    
     // LOGGING: Show the email_id and tracking pixel
     console.log('[SEND EMAIL] email_id:', email_id);
+    console.log('[SEND EMAIL] trackingUrl:', trackingUrl);
     console.log('[SEND EMAIL] trackingPixel:', trackingPixel);
+    console.log('[SEND EMAIL] BASE_URL:', BASE_URL);
 
     // 6. Create MIME multipart message if attachments exist
     let encodedMessage;
@@ -1378,20 +1401,50 @@ fastify.post('/api/email-tracking/open-events', async (request, reply) => {
 
 // --- Tracking Pixel: Email Open Tracking ---
 fastify.get('/track/open', async (request, reply) => {
+  const requestId = request.id || 'unknown';
+  
+  // Add CORS headers to allow the tracking pixel to load
+  reply.header('Access-Control-Allow-Origin', '*');
+  reply.header('Access-Control-Allow-Methods', 'GET');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type');
+  reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  reply.header('Pragma', 'no-cache');
+  reply.header('Expires', '0');
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('Content-Security-Policy', "default-src 'none'");
+
   const { email_id, user_id } = request.query as { email_id?: string; user_id?: string };
   
   // Log all request details for debugging
-  console.log('[TRACKING] Request received:', {
+  fastify.log.info({
+    msg: '[TRACKING] Request received',
+    requestId,
     email_id,
     user_id,
     headers: request.headers,
     url: request.url,
     method: request.method,
-    ip: request.ip
+    ip: request.ip,
+    baseUrl: BASE_URL,
+    referer: request.headers.referer,
+    origin: request.headers.origin,
+    host: request.headers.host,
+    query: request.query,
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      BASE_URL: process.env.BASE_URL,
+      VITE_API_URL: process.env.VITE_API_URL
+    }
   });
 
   if (!email_id || !user_id) {
-    console.log('[TRACKING] Missing parameters:', { email_id, user_id });
+    fastify.log.warn({
+      msg: '[TRACKING] Missing parameters',
+      requestId,
+      email_id,
+      user_id
+    });
     // Always return a 1x1 GIF, even if params are missing, to avoid breaking emails
     reply.header('Content-Type', 'image/gif');
     return Buffer.from(
@@ -1417,7 +1470,12 @@ fastify.get('/track/open', async (request, reply) => {
   ];
 
   if (botPatterns.some(pattern => pattern.test(userAgent))) {
-    console.log('[TRACKING] Skipping bot/preview open:', { email_id, userAgent });
+    fastify.log.info({
+      msg: '[TRACKING] Skipping bot/preview open',
+      requestId,
+      email_id,
+      userAgent
+    });
     reply.header('Content-Type', 'image/gif');
     return Buffer.from(
       'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
@@ -1425,15 +1483,39 @@ fastify.get('/track/open', async (request, reply) => {
     );
   }
 
-  // Log the open event in Supabase
-  const { data, error } = await supabase.from('email_opens').insert({
-    email_id,
-    user_id,
-    opened_at: new Date().toISOString(),
-    userAgent,
-    ip: request.ip
-  });
-  console.log('[TRACKING] Supabase insert result:', { data, error });
+  try {
+    // Log the open event in Supabase
+    const { data, error } = await supabase.from('email_opens').insert({
+      email_id,
+      user_id,
+      opened_at: new Date().toISOString(),
+      userAgent,
+      ip: request.ip
+    });
+    
+    if (error) {
+      fastify.log.error({
+        msg: '[TRACKING] Failed to insert open event',
+        requestId,
+        email_id,
+        error
+      });
+    } else {
+      fastify.log.info({
+        msg: '[TRACKING] Successfully recorded open event',
+        requestId,
+        email_id,
+        data
+      });
+    }
+  } catch (err) {
+    fastify.log.error({
+      msg: '[TRACKING] Error inserting open event',
+      requestId,
+      email_id,
+      error: err
+    });
+  }
   
   reply.header('Content-Type', 'image/gif');
   return Buffer.from(
