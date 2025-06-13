@@ -1518,8 +1518,7 @@ fastify.get('/track/open', async (request, reply) => {
       email_id,
       user_id: user_id || null, // Make user_id optional
       opened_at: new Date().toISOString(),
-      user_agent: userAgent,
-      ip: request.ip
+      user_agent: userAgent
     });
     
     if (error) {
