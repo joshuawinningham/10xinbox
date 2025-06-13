@@ -1211,7 +1211,8 @@ fastify.post('/api/gmail/send', async (request, reply) => {
              referrerpolicy="no-referrer-when-downgrade"
              crossorigin="anonymous"
              loading="lazy"
-             decoding="async" />
+             decoding="async"
+             data-tracking="true" />
       </div>`;
 
     // Validate tracking pixel
@@ -1468,16 +1469,22 @@ fastify.get('/track/open', async (request, reply) => {
     /security scan/i
   ];
 
-  // Allow Gmail's image proxy
+  // Allow Gmail's image proxy and other email clients
   const isGmailProxy = userAgent.includes('ggpht.com GoogleImageProxy');
-  const isBot = !isGmailProxy && botPatterns.some(pattern => pattern.test(userAgent));
+  const isEmailClient = userAgent.includes('Gmail') || 
+                       userAgent.includes('Outlook') || 
+                       userAgent.includes('Apple-Mail') ||
+                       userAgent.includes('Thunderbird');
+  const isBot = !isGmailProxy && !isEmailClient && botPatterns.some(pattern => pattern.test(userAgent));
 
   if (isBot) {
     fastify.log.info({
       msg: '[TRACKING] Skipping bot/preview open',
       requestId,
       email_id,
-      userAgent
+      userAgent,
+      isGmailProxy,
+      isEmailClient
     });
     reply.header('Content-Type', 'image/gif');
     return Buffer.from(
@@ -1509,7 +1516,8 @@ fastify.get('/track/open', async (request, reply) => {
         requestId,
         email_id,
         data,
-        isGmailProxy
+        isGmailProxy,
+        isEmailClient
       });
     }
   } catch (err) {
