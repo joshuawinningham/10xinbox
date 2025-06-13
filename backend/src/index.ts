@@ -1455,9 +1455,8 @@ fastify.get('/track/open', async (request, reply) => {
 
   const userAgent = request.headers['user-agent'] || '';
 
-  // Skip known bot/preview user agents
+  // Skip known bot/preview user agents, but allow Gmail's image proxy
   const botPatterns = [
-    /googleimageproxy/i,
     /outlook/i,
     /apple-mail/i,
     /thunderbird/i,
@@ -1469,7 +1468,11 @@ fastify.get('/track/open', async (request, reply) => {
     /security scan/i
   ];
 
-  if (botPatterns.some(pattern => pattern.test(userAgent))) {
+  // Allow Gmail's image proxy
+  const isGmailProxy = userAgent.includes('ggpht.com GoogleImageProxy');
+  const isBot = !isGmailProxy && botPatterns.some(pattern => pattern.test(userAgent));
+
+  if (isBot) {
     fastify.log.info({
       msg: '[TRACKING] Skipping bot/preview open',
       requestId,
@@ -1505,7 +1508,8 @@ fastify.get('/track/open', async (request, reply) => {
         msg: '[TRACKING] Successfully recorded open event',
         requestId,
         email_id,
-        data
+        data,
+        isGmailProxy
       });
     }
   } catch (err) {
