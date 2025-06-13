@@ -968,13 +968,7 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
   try {
-    // 1. Get a valid access token
-    const accessToken = await getValidAccessToken(user_id);
-    // 2. Set up Gmail API client
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or user_settings
+    // Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
       const { data: settingsRow } = await supabase
@@ -984,34 +978,85 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
         .single();
       tz = settingsRow?.time_zone || 'UTC';
     }
-    // 4. For each day, get inbox count at end of day
+
+    // Calculate date range
     const numDays = days && days > 0 && days <= 90 ? days : 30;
     const now = DateTime.now().setZone(tz);
+    const startDate = now.minus({ days: numDays - 1 }).startOf('day');
+    const startDateStr = startDate.toISODate();
+    const nowDateStr = now.toISODate();
+
+    if (!startDateStr || !nowDateStr) {
+      throw new Error('Failed to generate date strings');
+    }
+
+    // Fetch data from inbox_zero_days table
+    const { data: inboxZeroData, error: inboxZeroError } = await supabase
+      .from('inbox_zero_days')
+      .select('date, inbox_count')
+      .eq('user_id', user_id)
+      .gte('date', startDateStr)
+      .lte('date', nowDateStr)
+      .order('date', { ascending: true });
+
+    if (inboxZeroError) {
+      throw inboxZeroError;
+    }
+
+    // If we have gaps in the data, fetch from Gmail API for those dates
     const results: { date: string, inboxCount: number }[] = [];
+    const existingDates = new Set(inboxZeroData.map(d => d.date));
+    
+    // Get a valid access token for Gmail API
+    const accessToken = await getValidAccessToken(user_id);
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // For each day in range
     for (let i = 0; i < numDays; i++) {
       const day = now.minus({ days: i });
-      const endOfDay = day.endOf('day');
-      const before = Math.floor(endOfDay.toUTC().toSeconds());
-      // Count messages in INBOX before end of day
-      const res = await gmail.users.messages.list({
-        userId: 'me',
-        q: `label:INBOX before:${before}`,
-      });
-      const inboxCount = res.data.resultSizeEstimate || 0;
-      results.push({ date: day.toISODate() ?? '', inboxCount });
-    }
-    // Return in ascending order (oldest first)
-    return reply.send(results.reverse());
-  } catch (err: any) {
-    fastify.log.error(err);
-    // Check for insufficient permissions error from Google
-    if (err && err.errors && Array.isArray(err.errors)) {
-      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
-      if (insufficient) {
-        return reply.status(403).send({ error: 'insufficient_permissions' });
+      const dateStr = day.toISODate();
+      
+      if (!dateStr) {
+        continue; // Skip invalid dates
+      }
+      
+      if (existingDates.has(dateStr)) {
+        // Use data from database
+        const dayData = inboxZeroData.find(d => d.date === dateStr);
+        if (dayData) {
+          results.push({ date: dateStr, inboxCount: dayData.inbox_count });
+        }
+      } else {
+        // Fetch from Gmail API
+        const endOfDay = day.endOf('day');
+        const before = Math.floor(endOfDay.toUTC().toSeconds());
+        const res = await gmail.users.messages.list({
+          userId: 'me',
+          q: `label:INBOX before:${before}`,
+        });
+        const inboxCount = res.data.resultSizeEstimate || 0;
+        results.push({ date: dateStr, inboxCount });
+
+        // Store in database for future use
+        await supabase
+          .from('inbox_zero_days')
+          .upsert({
+            user_id,
+            date: dateStr,
+            inbox_count: inboxCount
+          }, {
+            onConflict: 'user_id,date'
+          });
       }
     }
-    return reply.status(500).send({ error: err.message || 'Failed to fetch inbox zero history' });
+
+    // Return in ascending order (oldest first)
+    return reply.send(results.reverse());
+  } catch (error) {
+    fastify.log.error('Failed to fetch inbox zero history:', error);
+    return reply.status(500).send({ error: 'Failed to fetch inbox zero history' });
   }
 });
 

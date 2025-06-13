@@ -119,37 +119,64 @@ async function main() {
       // Calculate basic metrics
       const emailsSent = emails.length;
 
-      // Calculate Inbox Zero Business Days and Consecutive Days for the current month up to yesterday
+      // Calculate inbox zero business days and streak
       let inboxZeroBusinessDays = 0;
-      let consecutiveInboxZeroDays = 0;
+      let inboxZeroStreak = 0;
       try {
-        // Get all inbox zero records for the current month up to yesterday
-        const monthStart = yesterday.startOf('month');
-        const { data: inboxZeroHistory, error: inboxZeroHistoryError } = await supabase
-          .from('inbox_zero_day')
-          .select('date, inboxCount')
+        // Get the first day of the current month
+        const firstDayOfMonth = today.startOf('month');
+        
+        // Get inbox zero data from the database
+        const { data: inboxZeroData, error: inboxZeroError } = await supabase
+          .from('inbox_zero_days')
+          .select('date, inbox_count')
           .eq('user_id', user.user_id)
-          .gte('date', monthStart.toISODate())
-          .lte('date', yesterdayDateStr);
-        if (inboxZeroHistoryError) throw inboxZeroHistoryError;
-        // Filter for business days (Mon-Fri)
-        const businessDays = inboxZeroHistory.filter((d: any) => {
-          const date = new Date(d.date);
-          return date.getDay() !== 0 && date.getDay() !== 6; // not Sunday or Saturday
-        });
-        inboxZeroBusinessDays = businessDays.filter((d: any) => d.inboxCount === 0).length;
-        // Calculate consecutive streak up to yesterday
-        let streak = 0;
-        for (let i = businessDays.length - 1; i >= 0; i--) {
-          if (businessDays[i].inboxCount === 0) {
-            streak++;
-          } else {
-            break;
-          }
+          .gte('date', firstDayOfMonth.toISODate())
+          .lte('date', yesterday.toISODate())
+          .order('date', { ascending: true });
+
+        if (inboxZeroError) {
+          throw inboxZeroError;
         }
-        consecutiveInboxZeroDays = streak;
-      } catch (err) {
-        logger.error('Failed to calculate inbox zero business days or streak:', err);
+
+        // Filter for business days (Monday to Friday) and count inbox zero days
+        const businessDays = inboxZeroData.filter(day => {
+          const date = DateTime.fromISO(day.date);
+          const dayOfWeek = date.weekday;
+          return dayOfWeek >= 1 && dayOfWeek <= 5 && day.inbox_count === 0;
+        });
+
+        inboxZeroBusinessDays = businessDays.length;
+
+        // Calculate business days streak
+        let currentStreak = 0;
+        let maxStreak = 0;
+        let lastDate: DateTime | null = null;
+
+        for (const day of businessDays) {
+          const currentDate = DateTime.fromISO(day.date);
+          
+          if (lastDate) {
+            const dayDiff = currentDate.diff(lastDate, 'days').days;
+            if (dayDiff === 1) {
+              currentStreak++;
+              maxStreak = Math.max(maxStreak, currentStreak);
+            } else {
+              currentStreak = 1;
+            }
+          } else {
+            currentStreak = 1;
+            maxStreak = 1;
+          }
+          
+          lastDate = currentDate;
+        }
+
+        inboxZeroStreak = maxStreak;
+      } catch (error) {
+        logger.error('Failed to calculate inbox zero business days or streak:', error);
+        inboxZeroBusinessDays = 0;
+        inboxZeroStreak = 0;
       }
 
       // Fetch received emails from Gmail for the previous day and aggregate by hour
@@ -158,62 +185,172 @@ async function main() {
         // 1. Get a valid access token
         const { data: tokenRow, error: tokenError } = await supabase
           .from('gmail_tokens')
-          .select('access_token')
+          .select('access_token, refresh_token, expires_at')
           .eq('user_id', user.user_id)
           .single();
-        if (tokenRow && tokenRow.access_token) {
-          const oauth2Client = new google.auth.OAuth2();
+        
+        if (tokenError) {
+          logger.error('Failed to fetch Gmail token:', { error: tokenError, userId: user.user_id });
+          throw tokenError;
+        }
+        
+        if (!tokenRow || !tokenRow.access_token) {
+          logger.error('No Gmail token found for user:', { userId: user.user_id });
+          throw new Error('No Gmail token found');
+        }
+
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          process.env.GOOGLE_REDIRECT_URI
+        );
+
+        // Check if token needs refresh
+        const tokenExpiry = new Date(tokenRow.expires_at);
+        const now = new Date();
+        if (now >= tokenExpiry) {
+          logger.info('Refreshing expired Gmail token', { userId: user.user_id });
+          try {
+            oauth2Client.setCredentials({
+              refresh_token: tokenRow.refresh_token
+            });
+            const { credentials } = await oauth2Client.refreshAccessToken();
+            
+            // Update the token in the database
+            const { error: updateError } = await supabase
+              .from('gmail_tokens')
+              .update({
+                access_token: credentials.access_token,
+                expires_at: new Date(Date.now() + (credentials.expiry_date || 3600000)).toISOString()
+              })
+              .eq('user_id', user.user_id);
+            
+            if (updateError) {
+              logger.error('Failed to update refreshed token:', { error: updateError, userId: user.user_id });
+              throw updateError;
+            }
+            
+            oauth2Client.setCredentials({ access_token: credentials.access_token });
+          } catch (refreshError) {
+            logger.error('Failed to refresh Gmail token:', { error: refreshError, userId: user.user_id });
+            throw refreshError;
+          }
+        } else {
           oauth2Client.setCredentials({ access_token: tokenRow.access_token });
-          const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-          // 2. Calculate after/before in UTC seconds
-          const after = Math.floor(yesterday.toUTC().toSeconds());
-          const before = Math.floor(today.toUTC().toSeconds());
-          // 3. Helper to fetch all messages matching a query (handles pagination)
-          async function fetchAllMessages(q: string) {
-            let messages: any[] = [];
-            let nextPageToken: string | undefined = undefined;
-            do {
-              const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
-                userId: 'me',
-                q,
-                pageToken: nextPageToken,
-                maxResults: 500,
+        }
+
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+        // 2. Calculate after/before in UTC seconds
+        const after = Math.floor(yesterday.toUTC().toSeconds());
+        const before = Math.floor(today.toUTC().toSeconds());
+        
+        logger.info('Fetching Gmail messages', { 
+          userId: user.user_id, 
+          after, 
+          before,
+          timezone: tz 
+        });
+
+        // 3. Helper to fetch all messages matching a query (handles pagination)
+        async function fetchAllMessages(q: string) {
+          let messages: any[] = [];
+          let nextPageToken: string | undefined = undefined;
+          do {
+            const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+              userId: 'me',
+              q,
+              pageToken: nextPageToken,
+              maxResults: 500,
+            });
+            if (res.data.messages) {
+              messages = messages.concat(res.data.messages);
+              logger.debug('Fetched messages batch', { 
+                count: res.data.messages.length,
+                total: messages.length,
+                query: q
               });
-              if (res.data.messages) messages = messages.concat(res.data.messages);
-              nextPageToken = res.data.nextPageToken ?? undefined;
-            } while (nextPageToken);
-            return messages;
-          }
-          // 4. Fetch received messages for the previous day
-          const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
-          // 5. Fetch message details to get internalDate (in parallel, limit concurrency)
-          async function fetchInternalDates(messages: any[]) {
-            const results: number[] = [];
-            const batchSize = 20;
-            for (let i = 0; i < messages.length; i += batchSize) {
-              const batch = messages.slice(i, i + batchSize);
-              const batchResults = await Promise.all(
-                batch.map(async (msg) => {
-                  const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-                  return Number(res.data.internalDate);
-                })
-              );
-              results.push(...batchResults);
             }
-            return results;
-          }
-          const receivedDates = await fetchInternalDates(receivedMessages);
-          // 6. Aggregate by hour (local to user)
-          receivedDates.forEach((ts) => {
-            // Convert UTC timestamp to user's local timezone
-            const localTime = DateTime.fromMillis(ts).setZone(tz);
-            if (localTime.isValid) {
-              hourlyReceived[localTime.hour]++;
-            }
+            nextPageToken = res.data.nextPageToken ?? undefined;
+          } while (nextPageToken);
+          return messages;
+        }
+
+        // 4. Fetch received messages for the previous day
+        const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
+        
+        logger.info('Fetched received messages', { 
+          count: receivedMessages.length,
+          userId: user.user_id 
+        });
+
+        if (receivedMessages.length === 0) {
+          logger.info('No received messages found for the period', {
+            userId: user.user_id,
+            after,
+            before
           });
         }
+
+        // 5. Fetch message details to get internalDate (in parallel, limit concurrency)
+        async function fetchInternalDates(messages: any[]) {
+          const results: number[] = [];
+          const batchSize = 20;
+          for (let i = 0; i < messages.length; i += batchSize) {
+            const batch = messages.slice(i, i + batchSize);
+            const batchResults = await Promise.all(
+              batch.map(async (msg) => {
+                try {
+                  const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
+                  return Number(res.data.internalDate);
+                } catch (error) {
+                  logger.error('Failed to fetch message details', {
+                    error,
+                    messageId: msg.id,
+                    userId: user.user_id
+                  });
+                  return null;
+                }
+              })
+            );
+            results.push(...batchResults.filter((date): date is number => date !== null));
+          }
+          return results;
+        }
+
+        const receivedDates = await fetchInternalDates(receivedMessages);
+        
+        logger.info('Processed received dates', {
+          count: receivedDates.length,
+          userId: user.user_id
+        });
+
+        // 6. Aggregate by hour (local to user)
+        receivedDates.forEach((ts) => {
+          // Convert UTC timestamp to user's local timezone
+          const localTime = DateTime.fromMillis(ts).setZone(tz);
+          if (localTime.isValid) {
+            hourlyReceived[localTime.hour]++;
+          } else {
+            logger.warn('Invalid timestamp encountered', {
+              timestamp: ts,
+              userId: user.user_id
+            });
+          }
+        });
+
+        logger.info('Hourly received breakdown', {
+          hourlyReceived,
+          userId: user.user_id
+        });
+
       } catch (err) {
-        logger.error('Failed to fetch hourly received stats for email report:', err);
+        logger.error('Failed to fetch hourly received stats for email report:', {
+          error: err,
+          userId: user.user_id,
+          timezone: tz
+        });
+        // Don't throw here, continue with empty hourlyReceived array
       }
 
       // Calculate hourly breakdown
@@ -280,7 +417,7 @@ async function main() {
             emailsReceived,
             avgResponseTime,
             inboxZeroBusinessDays,
-            consecutiveInboxZeroDays,
+            inboxZeroStreak,
             hourlySent,
             hourlyReceived,
             topSenders: [],
@@ -295,6 +432,7 @@ async function main() {
             averageThreadLength: 0,
             longestThread: 0,
             sentEmailsWithViews,
+            timezone: tz
           }),
         });
         logger.info(`Successfully sent daily report to ${user.email}`);

@@ -31,13 +31,13 @@ function formatDate(dateStr: string) {
   return `${mm}-${dd}-${yyyy}`;
 }
 
-type DailyReportEmailProps = {
+export type DailyReportEmailProps = {
   date: string;
   emailsSent: number;
   emailsReceived: number;
   avgResponseTime: string | number;
   inboxZeroBusinessDays: number;
-  consecutiveInboxZeroDays: number;
+  inboxZeroStreak: number;
   hourlySent?: number[];
   hourlyReceived?: number[];
   topSenders?: Array<{ email: string; name: string; count: number }>;
@@ -52,6 +52,7 @@ type DailyReportEmailProps = {
   averageThreadLength?: number;
   longestThread?: number;
   sentEmailsWithViews?: Array<{ name: string; email: string; subject: string; views: number }>;
+  timezone: string;
 };
 
 const baseUrl = "https://email-kpi.vercel.app";
@@ -62,7 +63,7 @@ export default function DailyReportEmail({
   emailsReceived,
   avgResponseTime,
   inboxZeroBusinessDays,
-  consecutiveInboxZeroDays,
+  inboxZeroStreak,
   hourlySent,
   hourlyReceived,
   topSenders,
@@ -77,6 +78,7 @@ export default function DailyReportEmail({
   averageThreadLength,
   longestThread,
   sentEmailsWithViews,
+  timezone,
 }: DailyReportEmailProps) {
   return (
     <Html>
@@ -124,14 +126,14 @@ export default function DailyReportEmail({
               </Column>
               <Column style={{ padding: "0 8px" }}>
                 <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Inbox Zero Days</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>{inboxZeroBusinessDays}</Text>
-                </div>
-              </Column>
-              <Column style={{ padding: "0 8px" }}>
-                <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Consecutive Days</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>{consecutiveInboxZeroDays}</Text>
+                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Inbox Zero Stats</Text>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
+                    <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+                      <h3 style={{ margin: '0 0 10px 0', color: '#1a1a1a', fontSize: '18px' }}>Business Days</h3>
+                      <p style={{ margin: '0', color: '#1a1a1a', fontSize: '36px', fontWeight: 'bold' }}>{inboxZeroBusinessDays}</p>
+                      <p style={{ margin: '5px 0 0 0', color: '#666666', fontSize: '14px' }}>Current Streak: {inboxZeroStreak} days</p>
+                    </div>
+                  </div>
                 </div>
               </Column>
             </Row>

@@ -6,44 +6,29 @@ import path from 'path';
 
 // Sample data for preview
 const sampleData = {
-  date: new Date().toISOString(),
-  emailsSent: 42,
-  emailsReceived: 38,
-  avgResponseTime: '2h 15m',
+  date: '2024-03-14',
+  emailsSent: 10,
+  emailsReceived: 15,
+  avgResponseTime: '2h 30m',
   inboxZeroBusinessDays: 5,
+  inboxZeroStreak: 3,
   consecutiveInboxZeroDays: 3,
-  currentInboxCount: 12,
-  hourlySent: Array.from({ length: 24 }, () => Math.floor(Math.random() * 10)),
-  hourlyReceived: Array.from({ length: 24 }, () => Math.floor(Math.random() * 10)),
-  topSenders: [
-    { email: 'john@example.com', name: 'John Doe', count: 15 },
-    { email: 'jane@example.com', name: 'Jane Smith', count: 12 },
-    { email: 'bob@example.com', name: 'Bob Johnson', count: 8 }
-  ],
-  topRecipients: [
-    { email: 'team@example.com', name: 'Team', count: 20 },
-    { email: 'support@example.com', name: 'Support', count: 15 },
-    { email: 'sales@example.com', name: 'Sales', count: 10 }
-  ],
-  responseTimeDistribution: [
-    { range: '0-1 hour', count: 25 },
-    { range: '1-4 hours', count: 15 },
-    { range: '4-24 hours', count: 8 },
-    { range: '>24 hours', count: 2 }
-  ],
+  currentInboxCount: 0,
+  hourlySent: Array(24).fill(0),
+  hourlyReceived: Array(24).fill(0),
+  topSenders: [],
+  topRecipients: [],
+  responseTimeDistribution: [],
   peakActivityHour: 14,
-  busiestHour: 10,
-  totalResponseTime: 5400,
+  busiestHour: 15,
+  totalResponseTime: 9000,
   quickestResponseTime: '5m',
-  slowestResponseTime: '48h',
-  emailThreads: 12,
-  averageThreadLength: 3.5,
-  longestThread: 8,
-  sentEmailsWithViews: [
-    { name: 'John Doe', email: 'john@example.com', subject: 'Welcome!', views: 3 },
-    { name: 'Jane Smith', email: 'jane@example.com', subject: 'Your Invoice', views: 1 },
-    { name: 'Bob Johnson', email: 'bob@example.com', subject: 'Meeting Follow-up', views: 0 },
-  ],
+  slowestResponseTime: '4h',
+  emailThreads: 5,
+  averageThreadLength: 3,
+  longestThread: 7,
+  sentEmailsWithViews: [],
+  timezone: 'America/New_York'
 };
 
 async function generatePreviews() {
