@@ -56,5 +56,5 @@ export function useTimeZone() {
       });
   }, [user?.id]);
 
-  return { timeZone, loading, error, updateTimeZone };
+  return { timeZone, setTimeZone, loading, error, updateTimeZone };
 } 

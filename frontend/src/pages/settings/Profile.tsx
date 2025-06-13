@@ -43,8 +43,8 @@ const timezones = [
 
 export default function SettingsProfile() {
   const { user } = useAuth();
-  const { gmailConnected, loading: gmailLoading } = useGmailConnection(user?.id);
-  const { timeZone, loading: tzLoading, error: tzError, updateTimeZone } = useTimeZone();
+  const { gmailConnected, setGmailConnected, loading: gmailLoading } = useGmailConnection(user?.id);
+  const { timeZone, setTimeZone, loading: tzLoading, error: tzError, updateTimeZone } = useTimeZone();
   const { signature: savedSignature, loading: signatureLoading, error: signatureError, updateSignature } = useSignature();
   const { theme, error: themeError, updateTheme } = useTheme();
   const [localSignature, setLocalSignature] = useState('');
@@ -92,6 +92,7 @@ export default function SettingsProfile() {
     try {
       setTzSaving(true);
       await updateTimeZone(localTimeZone);
+      setTimeZone(localTimeZone);
       setTzSaveSuccess(true);
       setTimeout(() => setTzSaveSuccess(false), 1500);
     } catch (err) {
@@ -130,7 +131,7 @@ export default function SettingsProfile() {
                 onClick={async () => {
                   if (user) {
                     await disconnectGmail(user.id);
-                    window.location.reload();
+                    setGmailConnected(false);
                   }
                 }}
                 disabled={gmailLoading || !user}
@@ -140,7 +141,12 @@ export default function SettingsProfile() {
             ) : (
               <Button
                 className="w-[280px]"
-                onClick={() => user && connectGmail(user.id)}
+                onClick={() => {
+                  if (user) {
+                    setGmailConnected(true);
+                    connectGmail(user.id);
+                  }
+                }}
                 disabled={gmailLoading || !user}
               >
                 {gmailLoading ? 'Checking...' : 'Connect Gmail'}

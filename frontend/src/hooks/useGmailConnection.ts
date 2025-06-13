@@ -20,5 +20,5 @@ export function useGmailConnection(userId: string | undefined) {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  return { gmailConnected, loading, error };
+  return { gmailConnected, setGmailConnected, loading, error };
 } 
