@@ -1458,9 +1458,9 @@ fastify.get('/track/open', async (request, reply) => {
     }
   });
 
-  if (!email_id || !user_id) {
+  if (!email_id) {
     fastify.log.warn({
-      msg: '[TRACKING] Missing parameters',
+      msg: '[TRACKING] Missing email_id',
       requestId,
       email_id,
       user_id
@@ -1516,9 +1516,10 @@ fastify.get('/track/open', async (request, reply) => {
     // Log the open event in Supabase
     const { data, error } = await supabase.from('email_opens').insert({
       email_id,
-      user_id,
+      user_id: user_id || null, // Make user_id optional
       opened_at: new Date().toISOString(),
-      userAgent,
+      user_agent: userAgent,
+      ip: request.ip
     });
     
     if (error) {

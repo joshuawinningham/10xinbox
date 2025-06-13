@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 CREATE TABLE IF NOT EXISTS email_opens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email_id UUID NOT NULL,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     opened_at TIMESTAMPTZ NOT NULL,
     user_agent TEXT,
     ip TEXT,
