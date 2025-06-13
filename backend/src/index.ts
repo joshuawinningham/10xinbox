@@ -1199,8 +1199,27 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       throw new Error('BASE_URL environment variable is required for email tracking');
     }
 
+    // Use RENDER_EXTERNAL_URL if available, otherwise fall back to BASE_URL
+    const trackingBaseUrl = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL;
+    if (!trackingBaseUrl) {
+      fastify.log.error({
+        msg: '[TRACKING] Missing BASE_URL or RENDER_EXTERNAL_URL',
+        requestId: request.id,
+        env: {
+          NODE_ENV: process.env.NODE_ENV,
+          BASE_URL: process.env.BASE_URL,
+          VITE_API_URL: process.env.VITE_API_URL
+        }
+      });
+      reply.header('Content-Type', 'image/gif');
+      return Buffer.from(
+        'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+        'base64'
+      );
+    }
+
     // 5. Append tracking pixel to the body with additional styling and alt text
-    const trackingUrl = `${BASE_URL}/track/open?email_id=${email_id}&user_id=${user_id}`;
+    const trackingUrl = `${trackingBaseUrl}/track/open?email_id=${email_id}&user_id=${user_id}`;
     const trackingPixel = `
       <!-- Email tracking pixel -->
       <div style="display:none;max-height:0px;overflow:hidden;mso-hide:all;">
@@ -1500,7 +1519,6 @@ fastify.get('/track/open', async (request, reply) => {
       user_id,
       opened_at: new Date().toISOString(),
       userAgent,
-      ip: request.ip
     });
     
     if (error) {
@@ -1508,7 +1526,8 @@ fastify.get('/track/open', async (request, reply) => {
         msg: '[TRACKING] Failed to insert open event',
         requestId,
         email_id,
-        error
+        error,
+        headers: request.headers
       });
     } else {
       fastify.log.info({
@@ -1517,7 +1536,8 @@ fastify.get('/track/open', async (request, reply) => {
         email_id,
         data,
         isGmailProxy,
-        isEmailClient
+        isEmailClient,
+        cfIp: request.headers['cf-connecting-ip']
       });
     }
   } catch (err) {
@@ -1525,7 +1545,8 @@ fastify.get('/track/open', async (request, reply) => {
       msg: '[TRACKING] Error inserting open event',
       requestId,
       email_id,
-      error: err
+      error: err,
+      headers: request.headers
     });
   }
   
