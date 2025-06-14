@@ -566,23 +566,43 @@ fastify.post('/api/auth/get-timezone', async (request, reply) => {
 
 // Endpoint to fetch historical email stats for a user
 fastify.post('/api/gmail/stats', async (request, reply) => {
-  const { user_id, days } = request.body as { user_id?: string, days?: number };
+  const { user_id, days, time_zone } = request.body as { user_id?: string, days?: number, time_zone?: string };
   if (!user_id) {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
   const numDays = days && days > 0 && days <= 90 ? days : 30; // Limit to max 90 days
   try {
-    const sinceDate = DateTime.utc().minus({ days: numDays - 1 }).toISODate();
+    // Get user's time zone from param or user_settings
+    let tz = time_zone;
+    if (!tz) {
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
+        .select('time_zone')
+        .eq('user_id', user_id)
+        .single();
+      tz = settingsRow?.time_zone || 'UTC';
+    }
+    // Calculate the start date in the user's local time zone
+    const now = DateTime.now().setZone(tz);
+    const startDate = now.minus({ days: numDays - 1 }).startOf('day');
+    const startDateStr = startDate.toISODate();
+    // Fetch stats from DB
     const { data: stats, error } = await supabase
       .from('email_stats')
       .select('*')
       .eq('user_id', user_id)
-      .gte('date', sinceDate)
+      .gte('date', startDateStr)
       .order('date', { ascending: true });
     if (error) {
       return reply.status(500).send({ error: error.message });
     }
-    return reply.send({ stats });
+    // Filter out any future days (relative to user's local time)
+    const todayStr = now.toISODate();
+    if (!todayStr) {
+      return reply.status(500).send({ error: 'Failed to generate today\'s date string' });
+    }
+    const filteredStats = (stats || []).filter(row => row.date <= todayStr);
+    return reply.send({ stats: filteredStats });
   } catch (err: any) {
     fastify.log.error(err);
     return reply.status(500).send({ error: err.message || 'Failed to fetch historical stats' });
