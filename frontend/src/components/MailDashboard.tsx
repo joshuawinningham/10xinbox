@@ -114,6 +114,9 @@ export default function MailDashboard() {
   const [selectedFolder, setSelectedFolder] = useState(FOLDER_LABELS[0].label);
   const [emails, setEmails] = useState<Email[]>([]);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  const [selectedEmailThreadId, setSelectedEmailThreadId] = useState<string | null>(null);
+  const [selectedEmailMessageId, setSelectedEmailMessageId] = useState<string | null>(null);
+  const [selectedEmailReferences, setSelectedEmailReferences] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emailBody, setEmailBody] = useState<string>('');
@@ -300,6 +303,9 @@ export default function MailDashboard() {
       .then(res => res.json())
       .then(data => {
         setEmailBody(data.body || '');
+        setSelectedEmailThreadId(data.threadId || null);
+        setSelectedEmailMessageId(data.messageId || null);
+        setSelectedEmailReferences(data.references || null);
         setBodyLoading(false);
       })
       .catch(() => {
@@ -335,6 +341,51 @@ export default function MailDashboard() {
     setComposeBody(''); // Set empty initial body
     setComposeError(null);
     setComposeSuccess(false);
+  };
+
+  // Update the form submission handlers to include thread information
+  const handleSendEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setComposeSending(true);
+    setComposeError(null);
+    setComposeSuccess(false);
+    try {
+      const formData = new FormData();
+      formData.append('user_id', user?.id || '');
+      formData.append('to', composeTo);
+      formData.append('subject', composeSubject);
+      // Add signature to body if it exists and isn't already in the body
+      const bodyWithSignature = signature && !composeBody.includes(signature) 
+        ? `${composeBody}\n\n${signature}`
+        : composeBody;
+      formData.append('body', bodyWithSignature);
+      // Add thread information if this is a reply
+      if (selectedEmailThreadId && selectedEmailMessageId) {
+        formData.append('thread_id', selectedEmailThreadId);
+        formData.append('in_reply_to', selectedEmailMessageId);
+        if (selectedEmailReferences) {
+          formData.append('references', selectedEmailReferences);
+        }
+      }
+      composeAttachments.forEach(att => {
+        formData.append('attachments', att.file, att.file.name);
+      });
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
+        method: 'POST',
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
+      setComposeSuccess(true);
+      setTimeout(() => {
+        setComposeOpen(false);
+        setComposeSuccess(false);
+      }, 1200);
+    } catch (err: unknown) {
+      setComposeError(err instanceof Error ? err.message : 'Failed to send email');
+    } finally {
+      setComposeSending(false);
+    }
   };
 
   return (
@@ -660,41 +711,7 @@ export default function MailDashboard() {
             </div>
             <form
               className="flex flex-col gap-2 p-6"
-              onSubmit={async e => {
-                e.preventDefault();
-                setComposeSending(true);
-                setComposeError(null);
-                setComposeSuccess(false);
-                try {
-                  const formData = new FormData();
-                  formData.append('user_id', user?.id || '');
-                  formData.append('to', composeTo);
-                  formData.append('subject', composeSubject);
-                  // Add signature to body if it exists and isn't already in the body
-                  const bodyWithSignature = signature && !composeBody.includes(signature) 
-                    ? `${composeBody}\n\n${signature}`
-                    : composeBody;
-                  formData.append('body', bodyWithSignature);
-                  composeAttachments.forEach(att => {
-                    formData.append('attachments', att.file, att.file.name);
-                  });
-                  const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
-                    method: 'POST',
-                    body: formData,
-                  });
-                  const json = await res.json();
-                  if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
-                  setComposeSuccess(true);
-                  setTimeout(() => {
-                    setComposeOpen(false);
-                    setComposeSuccess(false);
-                  }, 1200);
-                } catch (err: unknown) {
-                  setComposeError(err instanceof Error ? err.message : 'Failed to send email');
-                } finally {
-                  setComposeSending(false);
-                }
-              }}
+              onSubmit={handleSendEmail}
             >
               <div className="relative">
                 <input
@@ -807,41 +824,7 @@ export default function MailDashboard() {
           </div>
           <form
             className="flex flex-col gap-2 p-6 flex-1 min-w-0 pb-6 overflow-y-auto"
-            onSubmit={async e => {
-              e.preventDefault();
-              setComposeSending(true);
-              setComposeError(null);
-              setComposeSuccess(false);
-              try {
-                const formData = new FormData();
-                formData.append('user_id', user?.id || '');
-                formData.append('to', composeTo);
-                formData.append('subject', composeSubject);
-                // Add signature to body if it exists and isn't already in the body
-                const bodyWithSignature = signature && !composeBody.includes(signature) 
-                  ? `${composeBody}\n\n${signature}`
-                  : composeBody;
-                formData.append('body', bodyWithSignature);
-                composeAttachments.forEach(att => {
-                  formData.append('attachments', att.file, att.file.name);
-                });
-                const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/send`, {
-                  method: 'POST',
-                  body: formData,
-                });
-                const json = await res.json();
-                if (!res.ok || json.error) throw new Error(json.error || 'Failed to send email');
-                setComposeSuccess(true);
-                setTimeout(() => {
-                  setComposeOpen(false);
-                  setComposeSuccess(false);
-                }, 1200);
-              } catch (err: unknown) {
-                setComposeError(err instanceof Error ? err.message : 'Failed to send email');
-              } finally {
-                setComposeSending(false);
-              }
-            }}
+            onSubmit={handleSendEmail}
           >
             <div className="relative">
               <input

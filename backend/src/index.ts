@@ -16,6 +16,7 @@ import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { sendEmail } from './email';
 import fastifyMultipart from '@fastify/multipart';
 import { getCache, setCache, initCache } from './services/cache';
+import crypto from 'crypto';
 
 dotenv.config({ path: '.env.local' });
 
@@ -389,14 +390,14 @@ fastify.post('/api/report/send', async (request, reply) => {
       const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
       // 7. Fetch message details to get internalDate (in parallel, but limit concurrency)
       async function fetchInternalDates(messages: any[]) {
-        const results: number[] = [];
+        const results: { ts: number }[] = [];
         const batchSize = 20;
         for (let i = 0; i < messages.length; i += batchSize) {
           const batch = messages.slice(i, i + batchSize);
           const batchResults = await Promise.all(
             batch.map(async (msg) => {
               const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-              return Number(res.data.internalDate);
+              return { ts: Number(res.data.internalDate) };
             })
           );
           results.push(...batchResults);
@@ -405,19 +406,23 @@ fastify.post('/api/report/send', async (request, reply) => {
       }
       const sentDates = await fetchInternalDates(sentMessages);
       const receivedDates = await fetchInternalDates(receivedMessages);
-      // 8. Aggregate by hour (local to user)
+      // 8. Aggregate by hour (in user's timezone)
       hourlySent = Array(24).fill(0);
       hourlyReceived = Array(24).fill(0);
-      sentDates.forEach((ts) => {
-        const local = DateTime.fromMillis(ts, { zone: tz });
+      sentDates.forEach(({ ts }) => {
+        // Convert UTC timestamp to user's timezone
+        const local = DateTime.fromMillis(ts).setZone(tz);
         if (local >= start && local < end) {
-          hourlySent[local.hour]++;
+          const hour = local.hour;
+          hourlySent[hour]++;
         }
       });
-      receivedDates.forEach((ts) => {
-        const local = DateTime.fromMillis(ts, { zone: tz });
+      receivedDates.forEach(({ ts }) => {
+        // Convert UTC timestamp to user's timezone
+        const local = DateTime.fromMillis(ts).setZone(tz);
         if (local >= start && local < end) {
-          hourlyReceived[local.hour]++;
+          const hour = local.hour;
+          hourlyReceived[hour]++;
         }
       });
     } catch (err) {
@@ -616,7 +621,6 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
   if (!user_id) {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
-
   try {
     // Try to get from cache first
     const cacheKey = `hourly_stats:${user_id}:${time_zone || 'UTC'}`;
@@ -625,7 +629,13 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
       return reply.send(cachedData);
     }
 
-    // Get user's time zone from param or user_settings
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
       const { data: settingsRow } = await supabase
@@ -635,80 +645,70 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
         .single();
       tz = settingsRow?.time_zone || 'UTC';
     }
-
-    // Calculate time range (last 24 hours in user's timezone)
+    // 4. Get date range in user's time zone
     const now = DateTime.now().setZone(tz);
-    const localStart = now.minus({ hours: 24 }).startOf('hour');
-    const localEnd = now.endOf('hour');
-    const after = Math.floor(localStart.toUTC().toSeconds());
-    const before = Math.floor(localEnd.toUTC().toSeconds());
+    const start = now.startOf('day');
+    const end = start.plus({ days: 1 });
+    const after = Math.floor(start.toUTC().toSeconds());
+    const before = Math.floor(end.toUTC().toSeconds());
 
-    // Get a valid access token for Gmail API
-    const accessToken = await getValidAccessToken(user_id);
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    // Helper to fetch all messages with pagination
-    async function fetchAllMessages(query: string) {
-      const messages: any[] = [];
-      let pageToken: string | undefined;
+    // 5. Fetch all messages for today
+    async function fetchAllMessages(q: string) {
+      let messages: any[] = [];
+      let nextPageToken: string | undefined = undefined;
       do {
-        const res = await gmail.users.messages.list({
+        const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
           userId: 'me',
-          q: query,
-          pageToken,
-          maxResults: 500
+          q,
+          pageToken: nextPageToken,
+          maxResults: 500,
         });
-        if (res.data.messages) {
-          messages.push(...res.data.messages);
-        }
-        pageToken = res.data.nextPageToken ?? undefined;
-      } while (pageToken);
+        if (res.data.messages) messages = messages.concat(res.data.messages);
+        nextPageToken = res.data.nextPageToken ?? undefined;
+      } while (nextPageToken);
       return messages;
     }
+    const sentMessages = await fetchAllMessages(`after:${after} before:${before} label:SENT`);
+    const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
 
-    // Fetch sent and received messages in the wide window
-    const [sentMessages, receivedMessages] = await Promise.all([
-      fetchAllMessages(`after:${after} before:${before} from:me`),
-      fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`)
-    ]);
-
-    // Fetch message details to get internalDate (in parallel, but limit concurrency)
+    // 6. Fetch message details to get internalDate (in parallel, but limit concurrency)
     async function fetchInternalDates(messages: any[]) {
-      const results: { ts: number, id: string }[] = [];
-      const batchSize = 50; // Increased from 20 to 50
+      const results: { ts: number }[] = [];
+      const batchSize = 20;
       for (let i = 0; i < messages.length; i += batchSize) {
         const batch = messages.slice(i, i + batchSize);
         const batchResults = await Promise.all(
           batch.map(async (msg) => {
             const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-            return { ts: Number(res.data.internalDate), id: msg.id };
+            return { ts: Number(res.data.internalDate) };
           })
         );
         results.push(...batchResults);
       }
       return results;
     }
+    const sentDates = await fetchInternalDates(sentMessages);
+    const receivedDates = await fetchInternalDates(receivedMessages);
 
-    const [sentDates, receivedDates] = await Promise.all([
-      fetchInternalDates(sentMessages),
-      fetchInternalDates(receivedMessages)
-    ]);
-
-    // Filter and aggregate by local day/hour
+    // 7. Aggregate by hour (in user's timezone)
     const sentByHour = Array(24).fill(0);
     const receivedByHour = Array(24).fill(0);
+
     sentDates.forEach(({ ts }) => {
-      const local = DateTime.fromMillis(ts, { zone: tz });
-      if (local >= localStart && local < localEnd) {
-        sentByHour[local.hour]++;
+      // Convert UTC timestamp to user's timezone
+      const local = DateTime.fromMillis(ts).setZone(tz);
+      if (local >= start && local < end) {
+        const hour = local.hour;
+        sentByHour[hour]++;
       }
     });
+
     receivedDates.forEach(({ ts }) => {
-      const local = DateTime.fromMillis(ts, { zone: tz });
-      if (local >= localStart && local < localEnd) {
-        receivedByHour[local.hour]++;
+      // Convert UTC timestamp to user's timezone
+      const local = DateTime.fromMillis(ts).setZone(tz);
+      if (local >= start && local < end) {
+        const hour = local.hour;
+        receivedByHour[hour]++;
       }
     });
 
@@ -924,6 +924,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     end = start.plus({ days: 1 });
     const after = Math.floor(start.toUTC().toSeconds());
     const before = Math.floor(end.toUTC().toSeconds());
+
     // 5. Fetch all received emails for today (Inbox, not sent by me)
     async function fetchAllMessages(q: string) {
       let messages: any[] = [];
@@ -944,6 +945,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     if (receivedMessages.length === 0) {
       return reply.send({ average_response_time: null, count: 0 });
     }
+
     // 6. For each received message, find the first reply sent by the user in the same thread
     let totalResponseTime = 0;
     let responseCount = 0;
@@ -957,44 +959,56 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
           const receivedInternalDate = Number(res.data.internalDate);
           const threadId = res.data.threadId;
           if (!threadId) return null;
-          // Fetch all messages in the thread
+
+          // First check our sent_emails table for replies
+          const { data: sentEmails } = await supabase
+            .from('sent_emails')
+            .select('sent_at, thread_id')
+            .eq('user_id', user_id)
+            .eq('thread_id', threadId)
+            .gte('sent_at', new Date(receivedInternalDate).toISOString())
+            .order('sent_at', { ascending: true })
+            .limit(1);
+
+          if (sentEmails && sentEmails.length > 0) {
+            // Found a reply in our sent_emails table
+            const replyDate = new Date(sentEmails[0].sent_at).getTime();
+            // Convert Gmail's internalDate (milliseconds) to milliseconds for comparison
+            const responseTime = replyDate - receivedInternalDate;
+            if (responseTime > 0) { // Only count if reply is after received message
+              totalResponseTime += responseTime;
+              responseCount++;
+            }
+            return null;
+          }
+
+          // If no reply in sent_emails, check Gmail thread
           const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
           const threadMessages = threadRes.data.messages || [];
           // Find the first reply sent by the user after the received message
           const reply = threadMessages.find((m) => {
-            if (m.id === msg.id) return false; // skip the received message itself
-            if (m.labelIds && m.labelIds.includes('SENT')) {
-              const sentDate = Number(m.internalDate);
-              return sentDate > receivedInternalDate;
-            }
-            return false;
+            const headers = m.payload?.headers || [];
+            const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
+            return from.includes('me') && Number(m.internalDate) > receivedInternalDate;
           });
+
           if (reply) {
-            const replyDate = Number(reply.internalDate);
-            const responseTime = replyDate - receivedInternalDate;
-            totalResponseTime += responseTime;
-            responseCount++;
+            const responseTime = Number(reply.internalDate) - receivedInternalDate;
+            if (responseTime > 0) { // Only count if reply is after received message
+              totalResponseTime += responseTime;
+              responseCount++;
+            }
           }
           return null;
         })
       );
     }
-    if (responseCount === 0) {
-      return reply.send({ average_response_time: null, count: 0 });
-    }
-    // Average in seconds
-    const avgSeconds = Math.round(totalResponseTime / responseCount / 1000);
-    return reply.send({ average_response_time: avgSeconds, count: responseCount });
-  } catch (err: any) {
-    fastify.log.error(err);
-    // Check for insufficient permissions error from Google
-    if (err && err.errors && Array.isArray(err.errors)) {
-      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
-      if (insufficient) {
-        return reply.status(403).send({ error: 'insufficient_permissions' });
-      }
-    }
-    return reply.status(500).send({ error: err.message || 'Failed to calculate response time' });
+
+    const averageResponseTime = responseCount > 0 ? Math.round(totalResponseTime / responseCount / 1000) : null;
+    return reply.send({ average_response_time: averageResponseTime, count: responseCount });
+  } catch (error) {
+    fastify.log.error('Failed to fetch response time:', error);
+    return reply.status(500).send({ error: 'Failed to fetch response time' });
   }
 });
 
@@ -1150,32 +1164,36 @@ fastify.get('/api/gmail/messages', async (request, reply) => {
   }
 });
 
-// Endpoint to fetch the full body of a Gmail message for a user
+// Helper to decode base64url
+function decodeBody(body: string) {
+  return Buffer.from(body, 'base64').toString('utf-8');
+}
+
+// Endpoint to get message details
 fastify.get('/api/gmail/message', async (request, reply) => {
   const { user_id, message_id } = request.query as { user_id?: string, message_id?: string };
   if (!user_id || !message_id) {
     return reply.status(400).send({ error: 'Missing user_id or message_id' });
   }
   try {
+    // 1. Get a valid access token
     const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    const msgRes = await gmail.users.messages.get({
+    // 3. Get the message
+    const res = await gmail.users.messages.get({
       userId: 'me',
       id: message_id,
       format: 'full',
     });
-
-    // Helper to decode base64url
-    function decodeBody(body: string) {
-      return Buffer.from(body, 'base64').toString('utf-8');
-    }
-
-    // Find the plain text or HTML part
+    // 4. Extract headers
+    const headers = res.data.payload?.headers || [];
+    const getHeader = (name: string) => headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+    // 5. Get message body
     let body = '';
-    const payload = msgRes.data.payload;
+    const payload = res.data.payload;
     if (payload?.parts) {
       const part = payload.parts.find(p => p.mimeType === 'text/html') || payload.parts.find(p => p.mimeType === 'text/plain');
       if (part?.body?.data) {
@@ -1184,11 +1202,17 @@ fastify.get('/api/gmail/message', async (request, reply) => {
     } else if (payload?.body?.data) {
       body = decodeBody(payload.body.data);
     }
-
-    return reply.send({ body });
+    // 6. Return message details
+    return reply.send({
+      body,
+      threadId: res.data.threadId,
+      messageId: getHeader('Message-ID'),
+      references: getHeader('References'),
+      inReplyTo: getHeader('In-Reply-To')
+    });
   } catch (err: any) {
     fastify.log.error(err);
-    return reply.status(500).send({ error: err.message || 'Failed to fetch message body' });
+    return reply.status(500).send({ error: err.message || 'Failed to fetch message' });
   }
 });
 
@@ -1222,12 +1246,43 @@ fastify.post('/api/gmail/mark-read', async (request, reply) => {
 
 // Endpoint to send an email via Gmail API
 fastify.post('/api/gmail/send', async (request, reply) => {
-  console.log('Content-Type:', request.headers['content-type']);
-  console.log('isMultipart:', typeof request.isMultipart === 'function' ? request.isMultipart() : 'no isMultipart');
-  let user_id, to, subject, body, attachments = [];
-  if (request.isMultipart()) {
+  const { user_id, to, subject, body, thread_id, in_reply_to, references } = request.body as {
+    user_id?: string,
+    to?: string,
+    subject?: string,
+    body?: string,
+    thread_id?: string,
+    in_reply_to?: string,
+    references?: string
+  };
+  if (!user_id || !to || !subject || !body) {
+    return reply.status(400).send({ error: 'Missing required fields' });
+  }
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Get user's email and name
+    const { data: userData } = await supabase
+      .from('users')
+      .select('email, name')
+      .eq('id', user_id)
+      .single();
+    if (!userData?.email) {
+      throw new Error('User email not found');
+    }
+    const userEmail = userData.email;
+    const userName = userData.name || userEmail.split('@')[0];
+    // 4. Generate a unique email_id for tracking
+    const email_id = crypto.randomUUID();
+    // 5. Add tracking pixel to body
+    const bodyWithPixel = body + `<img src="${process.env.BASE_URL}/api/email/track?email_id=${email_id}" width="1" height="1" />`;
+    // 6. Create the email message
+    let encodedMessage: string;
     const parts = await request.parts();
-    const fields: Record<string, any> = {};
     const files: any[] = [];
     for await (const part of parts) {
       if (part.type === 'file') {
@@ -1238,101 +1293,9 @@ fastify.post('/api/gmail/send', async (request, reply) => {
           mimetype: part.mimetype,
           buffer: Buffer.concat(bufs),
         });
-      } else {
-        fields[part.fieldname] = part.value;
       }
     }
-    user_id = fields.user_id;
-    to = fields.to;
-    subject = fields.subject;
-    body = fields.body;
-    attachments = files;
-  } else {
-    ({ user_id, to, subject, body } = request.body as any);
-  }
-  if (!user_id || !to || !subject || !body) {
-    return reply.status(400).send({ error: 'Missing user_id, to, subject, or body' });
-  }
-  try {
-    // 1. Get tokens and user info from Supabase
-    const { data: userData, error: userError } = await supabase
-      .from('gmail_tokens')
-      .select('email, name, access_token, refresh_token, expires_at')
-      .eq('user_id', user_id)
-      .single();
-
-    if (userError || !userData) throw new Error('No tokens found for user');
-
-    const { email: userEmail, name: userName, access_token, refresh_token, expires_at } = userData;
-
-    // 2. Get a valid access token (refresh if needed)
-    const accessToken = await getValidAccessToken(user_id);
-    // 3. Set up Gmail API client
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    // 4. Generate a unique email_id for tracking
-    const email_id = uuidv4();
-    
-    // Validate BASE_URL
-    if (!BASE_URL) {
-      console.error('[SEND EMAIL] BASE_URL is not set!');
-      throw new Error('BASE_URL environment variable is required for email tracking');
-    }
-
-    // Use RENDER_EXTERNAL_URL if available, otherwise fall back to BASE_URL
-    const trackingBaseUrl = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL;
-    if (!trackingBaseUrl) {
-      fastify.log.error({
-        msg: '[TRACKING] Missing BASE_URL or RENDER_EXTERNAL_URL',
-        requestId: request.id,
-        env: {
-          NODE_ENV: process.env.NODE_ENV,
-          BASE_URL: process.env.BASE_URL,
-          VITE_API_URL: process.env.VITE_API_URL
-        }
-      });
-      reply.header('Content-Type', 'image/gif');
-      return Buffer.from(
-        'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
-        'base64'
-      );
-    }
-
-    // 5. Append tracking pixel to the body with additional styling and alt text
-    const trackingUrl = `${trackingBaseUrl}/track/open?email_id=${email_id}&user_id=${user_id}`;
-    const trackingPixel = `
-      <!-- Email tracking pixel -->
-      <div style="display:none;max-height:0px;overflow:hidden;mso-hide:all;">
-        <img src="${trackingUrl}" 
-             width="1" height="1" 
-             alt="Email tracking pixel"
-             style="display:none;width:1px;height:1px;opacity:0;color:transparent;mso-hide:all;"
-             referrerpolicy="no-referrer-when-downgrade"
-             crossorigin="anonymous"
-             loading="lazy"
-             decoding="async"
-             data-tracking="true" />
-      </div>`;
-
-    // Validate tracking pixel
-    if (!trackingPixel.includes(email_id) || !trackingPixel.includes(user_id)) {
-      console.error('[SEND EMAIL] Invalid tracking pixel generated:', { email_id, user_id, trackingPixel });
-      throw new Error('Failed to generate valid tracking pixel');
-    }
-
-    const bodyWithPixel = body + trackingPixel;
-    
-    // LOGGING: Show the email_id and tracking pixel
-    console.log('[SEND EMAIL] email_id:', email_id);
-    console.log('[SEND EMAIL] trackingUrl:', trackingUrl);
-    console.log('[SEND EMAIL] trackingPixel:', trackingPixel);
-    console.log('[SEND EMAIL] BASE_URL:', BASE_URL);
-
-    // 6. Create MIME multipart message if attachments exist
-    let encodedMessage;
-    if (attachments && attachments.length > 0) {
+    if (files.length > 0) {
       const boundary = '----=_Part_' + Date.now();
       let mime = '';
       mime += `MIME-Version: 1.0\r\n`;
@@ -1340,10 +1303,15 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       mime += `From: \"${userName}\" <${userEmail}>\r\n`;
       mime += `To: ${to}\r\n`;
       mime += `Subject: ${subject}\r\n`;
+      // Add thread headers if this is a reply
+      if (thread_id && in_reply_to) {
+        mime += `In-Reply-To: ${in_reply_to}\r\n`;
+        mime += `References: ${references || in_reply_to}\r\n`;
+      }
       mime += `\r\n--${boundary}\r\n`;
       mime += `Content-Type: text/html; charset=utf-8\r\n\r\n`;
       mime += bodyWithPixel + '\r\n';
-      for (const file of attachments) {
+      for (const file of files) {
         mime += `--${boundary}\r\n`;
         mime += `Content-Type: ${file.mimetype || 'application/octet-stream'}; name=\"${file.filename}\"\r\n`;
         mime += `Content-Disposition: attachment; filename=\"${file.filename}\"\r\n`;
@@ -1360,11 +1328,16 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       const message = [
         'Content-Type: text/html; charset=utf-8',
         'MIME-Version: 1.0',
-        `From: \"${userName}\" <${userEmail}>`,
+        `From: "${userName}" <${userEmail}>`,
         `To: ${to}`,
         `Subject: ${subject}`,
+        // Add thread headers if this is a reply
+        ...(thread_id && in_reply_to ? [
+          `In-Reply-To: ${in_reply_to}`,
+          `References: ${references || in_reply_to}`
+        ] : []),
         '',
-        bodyWithPixel,
+        bodyWithPixel
       ].join('\r\n');
       encodedMessage = Buffer.from(message)
         .toString('base64')
@@ -1374,12 +1347,16 @@ fastify.post('/api/gmail/send', async (request, reply) => {
     }
 
     // 7. Send the email
-    await gmail.users.messages.send({
+    const sendResponse = await gmail.users.messages.send({
       userId: 'me',
       requestBody: {
         raw: encodedMessage,
+        threadId: thread_id // Add threadId if this is a reply
       },
     });
+
+    // Get the thread ID from the response
+    const sentThreadId = sendResponse.data.threadId || thread_id;
 
     // 8. Insert into sent_emails
     // Parse to_name and to_email from the To field
@@ -1400,6 +1377,7 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       subject,
       sent_at: new Date().toISOString(),
       body,
+      thread_id: sentThreadId // Use the thread ID from the Gmail API response
     });
     console.log('SENT_EMAILS INSERT:', { sentEmailData, sentEmailError });
 
@@ -1410,369 +1388,19 @@ fastify.post('/api/gmail/send', async (request, reply) => {
   }
 });
 
-// Endpoint: Email Open Analytics
-fastify.post('/api/email-tracking/analytics', async (request, reply) => {
-  const { user_id } = request.body as { user_id?: string };
-  if (!user_id) {
-    return reply.status(400).send({ error: 'Missing user_id' });
-  }
-  try {
-    // 1. Total sent emails (from email_stats table, sum emails_sent)
-    const { data: sentRows, error: sentError } = await supabase
-      .from('email_stats')
-      .select('emails_sent')
-      .eq('user_id', user_id);
-    if (sentError) throw sentError;
-    const totalSent = sentRows?.reduce((sum, row) => sum + (row.emails_sent || 0), 0) || 0;
+// Initialize cache
+initCache();
 
-    // 2. Total opened emails (distinct email_id in email_opens)
-    const { data: openRows2, error: openError2 } = await supabase
-      .from('email_opens')
-      .select('email_id')
-      .eq('user_id', user_id);
-    if (openError2) throw openError2;
-    const openCounts: Record<string, number> = {};
-    openRows2?.forEach(row => {
-      if (row.email_id) {
-        openCounts[row.email_id] = (openCounts[row.email_id] || 0) + 1;
-      }
-    });
-    let mostOpened = null;
-    const sorted = Object.entries(openCounts).sort((a, b) => b[1] - a[1]);
-    if (sorted.length > 0) {
-      mostOpened = { email_id: sorted[0][0], count: sorted[0][1] };
-    }
-
-    // 3. Open rate
-    const openRate = totalSent > 0 ? (Object.keys(openCounts).length / totalSent) * 100 : 0;
-
-    // 4. Opens over time (last 30 days)
-    const { data: openEvents, error: openEventsError } = await supabase
-      .from('email_opens')
-      .select('opened_at')
-      .eq('user_id', user_id)
-      .gte('opened_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
-    if (openEventsError) throw openEventsError;
-    // Group by date
-    const opensByDate: Record<string, number> = {};
-    openEvents?.forEach(ev => {
-      const date = ev.opened_at?.slice(0, 10); // YYYY-MM-DD
-      if (date) opensByDate[date] = (opensByDate[date] || 0) + 1;
-    });
-    const opensOverTime = Object.entries(opensByDate).map(([date, count]) => ({ date, count }));
-
-    return reply.send({
-      totalSent,
-      totalOpened: Object.keys(openCounts).length,
-      openRate,
-      mostOpened,
-      opensOverTime,
-    });
-  } catch (err: any) {
-    fastify.log.error(err);
-    return reply.status(500).send({ error: err.message || 'Failed to fetch analytics' });
-  }
-});
-
-// Update sent-emails endpoint to use sent_emails table
-fastify.post('/api/email-tracking/sent-emails', async (request, reply) => {
-  const { user_id } = request.body as { user_id?: string };
-  if (!user_id) return reply.status(400).send({ error: 'Missing user_id' });
-  const { data, error } = await supabase
-    .from('sent_emails')
-    .select('email_id, to_name, to_email, subject, sent_at')
-    .eq('user_id', user_id)
-    .order('sent_at', { ascending: false });
-  if (error) return reply.status(500).send({ error: error.message });
-  return reply.send(data);
-});
-
-// Get open events for a specific email
-fastify.post('/api/email-tracking/open-events', async (request, reply) => {
-  const { user_id, email_id } = request.body as { user_id?: string, email_id?: string };
-  if (!user_id || !email_id) return reply.status(400).send({ error: 'Missing user_id or email_id' });
-  const { data, error } = await supabase
-    .from('email_opens')
-    .select('opened_at, user_agent')
-    .eq('user_id', user_id)
-    .eq('email_id', email_id)
-    .order('opened_at', { ascending: true });
-  if (error) return reply.status(500).send({ error: error.message });
-  return reply.send(data);
-});
-
-// --- Tracking Pixel: Email Open Tracking ---
-fastify.get('/track/open', async (request, reply) => {
-  const requestId = request.id || 'unknown';
-  
-  // Add CORS headers to allow the tracking pixel to load
-  reply.header('Access-Control-Allow-Origin', '*');
-  reply.header('Access-Control-Allow-Methods', 'GET');
-  reply.header('Access-Control-Allow-Headers', 'Content-Type');
-  reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
-  reply.header('Pragma', 'no-cache');
-  reply.header('Expires', '0');
-  reply.header('X-Content-Type-Options', 'nosniff');
-  reply.header('X-Frame-Options', 'DENY');
-  reply.header('Content-Security-Policy', "default-src 'none'");
-
-  const { email_id, user_id } = request.query as { email_id?: string; user_id?: string };
-  
-  // Log all request details for debugging
-  fastify.log.info({
-    msg: '[TRACKING] Request received',
-    requestId,
-    email_id,
-    user_id,
-    headers: request.headers,
-    url: request.url,
-    method: request.method,
-    ip: request.ip,
-    baseUrl: BASE_URL,
-    referer: request.headers.referer,
-    origin: request.headers.origin,
-    host: request.headers.host,
-    query: request.query,
-    env: {
-      NODE_ENV: process.env.NODE_ENV,
-      BASE_URL: process.env.BASE_URL,
-      VITE_API_URL: process.env.VITE_API_URL
-    }
-  });
-
-  if (!email_id) {
-    fastify.log.warn({
-      msg: '[TRACKING] Missing email_id',
-      requestId,
-      email_id,
-      user_id
-    });
-    // Always return a 1x1 GIF, even if params are missing, to avoid breaking emails
-    reply.header('Content-Type', 'image/gif');
-    return Buffer.from(
-      'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
-      'base64'
-    );
-  }
-
-  const userAgent = request.headers['user-agent'] || '';
-
-  // Skip known bot/preview user agents, but allow Gmail's image proxy
-  const botPatterns = [
-    /outlook/i,
-    /apple-mail/i,
-    /thunderbird/i,
-    /mozilla\/5\.0.*applewebkit.*safari/i,
-    /bot/i,
-    /crawler/i,
-    /spider/i,
-    /preview/i,
-    /security scan/i
-  ];
-
-  // Allow Gmail's image proxy and other email clients
-  const isGmailProxy = userAgent.includes('ggpht.com GoogleImageProxy');
-  const isEmailClient = userAgent.includes('Gmail') || 
-                       userAgent.includes('Outlook') || 
-                       userAgent.includes('Apple-Mail') ||
-                       userAgent.includes('Thunderbird');
-  const isBot = !isGmailProxy && !isEmailClient && botPatterns.some(pattern => pattern.test(userAgent));
-
-  if (isBot) {
-    fastify.log.info({
-      msg: '[TRACKING] Skipping bot/preview open',
-      requestId,
-      email_id,
-      userAgent,
-      isGmailProxy,
-      isEmailClient
-    });
-    reply.header('Content-Type', 'image/gif');
-    return Buffer.from(
-      'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
-      'base64'
-    );
-  }
-
-  try {
-    // Log the open event in Supabase
-    const { data, error } = await supabase.from('email_opens').insert({
-      email_id,
-      user_id: user_id || null, // Make user_id optional
-      opened_at: new Date().toISOString(),
-      user_agent: userAgent
-    });
-    
-    if (error) {
-      fastify.log.error({
-        msg: '[TRACKING] Failed to insert open event',
-        requestId,
-        email_id,
-        error,
-        headers: request.headers
-      });
-    } else {
-      fastify.log.info({
-        msg: '[TRACKING] Successfully recorded open event',
-        requestId,
-        email_id,
-        data,
-        isGmailProxy,
-        isEmailClient,
-        cfIp: request.headers['cf-connecting-ip']
-      });
-    }
-  } catch (err) {
-    fastify.log.error({
-      msg: '[TRACKING] Error inserting open event',
-      requestId,
-      email_id,
-      error: err,
-      headers: request.headers
-    });
-  }
-  
-  reply.header('Content-Type', 'image/gif');
-  return Buffer.from(
-    'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
-    'base64'
-  );
-});
-
-// Endpoint to get unique contacts for a user
-fastify.post('/api/contacts', async (request, reply) => {
-  const { user_id } = request.body as { user_id?: string };
-  if (!user_id) return reply.status(400).send({ error: 'Missing user_id' });
-
-  try {
-    // Get a valid access token
-    const accessToken = await getValidAccessToken(user_id);
-
-    // Set up Gmail API client
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    // Get all sent emails for this user from our database
-    const { data: sentData, error: sentError } = await supabase
-      .from('sent_emails')
-      .select('to_name, to_email')
-      .eq('user_id', user_id);
-
-    if (sentError) return reply.status(500).send({ error: sentError.message });
-
-    // Get received emails from Gmail
-    const receivedRes = await gmail.users.messages.list({
-      userId: 'me',
-      q: 'label:INBOX -from:me',
-      maxResults: 100, // Limit to last 100 received emails for performance
-    });
-
-    // Build unique contacts list
-    const contactsMap: Record<string, { name: string; email: string }> = {};
-
-    // Add sent email contacts
-    (sentData || []).forEach(row => {
-      if (row.to_email) {
-        contactsMap[row.to_email] = {
-          name: row.to_name || row.to_email,
-          email: row.to_email,
-        };
-      }
-    });
-
-    // Add received email contacts
-    if (receivedRes.data.messages) {
-      const messageDetails = await Promise.all(
-        receivedRes.data.messages.map(async (message) => {
-          const details = await gmail.users.messages.get({
-            userId: 'me',
-            id: message.id!,
-            format: 'metadata',
-            metadataHeaders: ['From'],
-          });
-          return details.data.payload?.headers?.find(h => h.name === 'From')?.value;
-        })
-      );
-
-      messageDetails.forEach(from => {
-        if (from) {
-          // Parse "Name <email@example.com>" format
-          const match = from.match(/^(.*?)\s*<([^>]+)>$/);
-          if (match) {
-            const [, name, email] = match;
-            contactsMap[email] = {
-              name: name.trim() || email,
-              email: email,
-            };
-          } else {
-            // If no name provided, use email as both
-            contactsMap[from] = {
-              name: from,
-              email: from,
-            };
-          }
-        }
-      });
-    }
-
-    // Return as array
-    return reply.send(Object.values(contactsMap));
-  } catch (err: any) {
-    fastify.log.error(err);
-    return reply.status(500).send({ error: err.message || 'Failed to fetch contacts' });
-  }
-});
-
-// Endpoint to set the user's theme
-fastify.post('/api/auth/set-theme', async (request, reply) => {
-  const { user_id, theme } = request.body as { user_id?: string; theme?: string };
-  if (!user_id || !theme) {
-    fastify.log.error('Missing user_id or theme in request:', { user_id, theme });
-    return reply.status(400).send({ error: 'Missing user_id or theme' });
-  }
-  fastify.log.info('Setting theme:', { user_id, theme });
-  const { error } = await supabase
-    .from('user_settings')
-    .upsert({ user_id, theme }, { onConflict: 'user_id' });
-  if (error) {
-    fastify.log.error('Failed to set theme:', error);
-    return reply.status(500).send({ error: error.message });
-  }
-  fastify.log.info('Successfully set theme');
-  return reply.send({ success: true });
-});
-
-// Endpoint to get the user's theme
-fastify.post('/api/auth/get-theme', async (request, reply) => {
-  const { user_id } = request.body as { user_id?: string };
-  if (!user_id) {
-    fastify.log.error('Missing user_id in get-theme request:', { user_id });
-    return reply.status(400).send({ error: 'Missing user_id' });
-  }
-  const { data, error } = await supabase
-    .from('user_settings')
-    .select('theme')
-    .eq('user_id', user_id)
-    .single();
-  if (error) {
-    fastify.log.error('Failed to get theme:', error);
-    return reply.status(500).send({ error: error.message });
-  }
-  return reply.send({ theme: data?.theme || 'blue' });
-});
-
+// Start the server
 const start = async () => {
   try {
-    // Initialize cache
-    await initCache();
-    
-    await fastify.listen({ port: Number(process.env.PORT) || 3001, host: '0.0.0.0' });
-    console.log(`Server listening on port ${process.env.PORT || 3001}`);
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+    await fastify.listen({ port, host: '0.0.0.0' });
+    console.log(`Server listening on port ${port}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
   }
 };
 
-start(); 
+start();

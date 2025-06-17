@@ -30,10 +30,12 @@ export function useEmailStats(view: EmailStatsView) {
           });
           const json = await res.json();
           if (json.error) throw new Error(json.error);
-          stats = Array.from({ length: 24 }, (_, i) => ({
-            hour: i,
-            emails_sent: json.sent[i] || 0,
-            emails_received: json.received[i] || 0,
+          // Ensure all 24 hours are present, fill missing with zeros
+          const hours = Array.from({ length: 24 }, (_, i) => i);
+          stats = hours.map(hour => ({
+            hour,
+            emails_sent: json.sent[hour] || 0,
+            emails_received: json.received[hour] || 0,
           }));
         } else {
           // For daily, monthly, yearly, fetch stats for up to 365 days
@@ -70,30 +72,24 @@ export function useEmailStats(view: EmailStatsView) {
               emails_received: daily[i + 1]?.emails_received ?? 0,
             }));
           } else if (view === 'yearly') {
-            // Aggregate by month for last 12 months
+            // Aggregate by month of current year
             const now = DateTime.now().setZone(tz);
-            const months: { [key: string]: { emails_sent: number, emails_received: number } } = {};
+            const year = now.year;
+            const monthly: Record<number, { emails_sent: number, emails_received: number }> = {};
             statsRaw.forEach((row: any) => {
               const dateObj = DateTime.fromISO(row.date, { zone: tz });
-              const key = `${dateObj.year}-${dateObj.month.toString().padStart(2, '0')}`;
-              if (!months[key]) months[key] = { emails_sent: 0, emails_received: 0 };
-              months[key].emails_sent += row.emails_sent;
-              months[key].emails_received += row.emails_received;
+              if (dateObj.year === year) {
+                const month = dateObj.month;
+                if (!monthly[month]) monthly[month] = { emails_sent: 0, emails_received: 0 };
+                monthly[month].emails_sent += row.emails_sent;
+                monthly[month].emails_received += row.emails_received;
+              }
             });
-            // Get last 12 months keys in order
-            const monthKeys = [];
-            for (let i = 11; i >= 0; i--) {
-              const d = now.minus({ months: i });
-              monthKeys.push(`${d.year}-${d.month.toString().padStart(2, '0')}`);
-            }
-            stats = monthKeys.map(key => {
-              const d = DateTime.fromISO(`${key}-01`, { zone: tz });
-              return {
-                date: d.isValid ? d.toFormat('MMM') : key, // fallback for debugging
-                emails_sent: months[key]?.emails_sent || 0,
-                emails_received: months[key]?.emails_received || 0,
-              };
-            });
+            stats = Array.from({ length: 12 }, (_, i) => ({
+              date: DateTime.fromObject({ month: i + 1 }).toFormat('MMM'),
+              emails_sent: monthly[i + 1]?.emails_sent ?? 0,
+              emails_received: monthly[i + 1]?.emails_received ?? 0,
+            }));
           } else {
             // Daily: always show current week as Mon-Sun
             const today = DateTime.now().setZone(tz);
