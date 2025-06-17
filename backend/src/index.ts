@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { sendEmail } from './email';
 import fastifyMultipart from '@fastify/multipart';
+import { getCache, setCache, initCache } from './services/cache';
 
 dotenv.config({ path: '.env.local' });
 
@@ -615,14 +616,16 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
   if (!user_id) {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
+
   try {
-    // 1. Get a valid access token
-    const accessToken = await getValidAccessToken(user_id);
-    // 2. Set up Gmail API client
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or user_settings
+    // Try to get from cache first
+    const cacheKey = `hourly_stats:${user_id}:${time_zone || 'UTC'}`;
+    const cachedData = await getCache<{ sent: number[], received: number[] }>(cacheKey);
+    if (cachedData) {
+      return reply.send(cachedData);
+    }
+
+    // Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
       const { data: settingsRow } = await supabase
@@ -632,38 +635,49 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
         .single();
       tz = settingsRow?.time_zone || 'UTC';
     }
-    // 4. Get local day start/end in user's time zone
+
+    // Calculate time range (last 24 hours in user's timezone)
     const now = DateTime.now().setZone(tz);
-    const localStart = now.startOf('day');
-    const localEnd = localStart.plus({ days: 1 });
-    // 5. Fetch a wider UTC window (midnight UTC to midnight UTC next day)
-    const utcStart = localStart.toUTC().startOf('day');
-    const utcEnd = utcStart.plus({ days: 2 });
-    const after = Math.floor(utcStart.toSeconds());
-    const before = Math.floor(utcEnd.toSeconds());
-    // 6. Helper to fetch all messages matching a query (handles pagination)
-    async function fetchAllMessages(q: string) {
-      let messages: any[] = [];
-      let nextPageToken: string | undefined = undefined;
+    const localStart = now.minus({ hours: 24 }).startOf('hour');
+    const localEnd = now.endOf('hour');
+    const after = Math.floor(localStart.toUTC().toSeconds());
+    const before = Math.floor(localEnd.toUTC().toSeconds());
+
+    // Get a valid access token for Gmail API
+    const accessToken = await getValidAccessToken(user_id);
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Helper to fetch all messages with pagination
+    async function fetchAllMessages(query: string) {
+      const messages: any[] = [];
+      let pageToken: string | undefined;
       do {
-        const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+        const res = await gmail.users.messages.list({
           userId: 'me',
-          q,
-          pageToken: nextPageToken,
-          maxResults: 500,
+          q: query,
+          pageToken,
+          maxResults: 500
         });
-        if (res.data.messages) messages = messages.concat(res.data.messages);
-        nextPageToken = res.data.nextPageToken ?? undefined;
-      } while (nextPageToken);
+        if (res.data.messages) {
+          messages.push(...res.data.messages);
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+      } while (pageToken);
       return messages;
     }
-    // 7. Fetch sent and received messages in the wide window
-    const sentMessages = await fetchAllMessages(`after:${after} before:${before} from:me`);
-    const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
-    // 8. Fetch message details to get internalDate (in parallel, but limit concurrency)
+
+    // Fetch sent and received messages in the wide window
+    const [sentMessages, receivedMessages] = await Promise.all([
+      fetchAllMessages(`after:${after} before:${before} from:me`),
+      fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`)
+    ]);
+
+    // Fetch message details to get internalDate (in parallel, but limit concurrency)
     async function fetchInternalDates(messages: any[]) {
       const results: { ts: number, id: string }[] = [];
-      const batchSize = 20;
+      const batchSize = 50; // Increased from 20 to 50
       for (let i = 0; i < messages.length; i += batchSize) {
         const batch = messages.slice(i, i + batchSize);
         const batchResults = await Promise.all(
@@ -676,9 +690,13 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
       }
       return results;
     }
-    const sentDates = await fetchInternalDates(sentMessages);
-    const receivedDates = await fetchInternalDates(receivedMessages);
-    // 9. Filter and aggregate by local day/hour
+
+    const [sentDates, receivedDates] = await Promise.all([
+      fetchInternalDates(sentMessages),
+      fetchInternalDates(receivedMessages)
+    ]);
+
+    // Filter and aggregate by local day/hour
     const sentByHour = Array(24).fill(0);
     const receivedByHour = Array(24).fill(0);
     sentDates.forEach(({ ts }) => {
@@ -693,17 +711,16 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
         receivedByHour[local.hour]++;
       }
     });
-    return reply.send({ sent: sentByHour, received: receivedByHour });
-  } catch (err: any) {
-    fastify.log.error(err);
-    // Check for insufficient permissions error from Google
-    if (err && err.errors && Array.isArray(err.errors)) {
-      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
-      if (insufficient) {
-        return reply.status(403).send({ error: 'insufficient_permissions' });
-      }
-    }
-    return reply.status(500).send({ error: err.message || 'Failed to fetch hourly stats' });
+
+    const result = { sent: sentByHour, received: receivedByHour };
+    
+    // Cache the result for 15 minutes
+    await setCache(cacheKey, result, 900);
+    
+    return reply.send(result);
+  } catch (error) {
+    fastify.log.error('Failed to fetch hourly stats:', error);
+    return reply.status(500).send({ error: 'Failed to fetch hourly stats' });
   }
 });
 
@@ -1747,6 +1764,9 @@ fastify.post('/api/auth/get-theme', async (request, reply) => {
 
 const start = async () => {
   try {
+    // Initialize cache
+    await initCache();
+    
     await fastify.listen({ port: Number(process.env.PORT) || 3001, host: '0.0.0.0' });
     console.log(`Server listening on port ${process.env.PORT || 3001}`);
   } catch (err) {
