@@ -1061,6 +1061,34 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
       return reply.send(await retryRes.json());
     }
     
+    // If we have some responses but fewer than expected, and this is a retry, wait and try again
+    if (responseCount > 0 && responseCount < receivedMessages.length * 0.5 && retry_count < 3) {
+      fastify.log.info('Fewer responses than expected, retrying response time calculation', {
+        userId: user_id,
+        retryCount: retry_count,
+        responseCount,
+        receivedMessagesCount: receivedMessages.length,
+        expectedRatio: responseCount / receivedMessages.length
+      });
+      
+      // Wait 5 seconds before retrying (longer wait for partial results)
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // Retry the calculation
+      const retryRes = await fetch(`${request.protocol}://${request.hostname}/api/gmail/response-time`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          user_id, 
+          time_zone: tz, 
+          day, 
+          retry_count: retry_count + 1 
+        }),
+      });
+      
+      return reply.send(await retryRes.json());
+    }
+    
     if (responseCount === 0) {
       return reply.send({ average_response_time: null, count: 0 });
     }
@@ -1680,6 +1708,17 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       isReply: subject.startsWith('Re:'),
       inReplyTo: inReplyTo || 'none'
     });
+
+    // Temporary debugging: Log threading info for frontend
+    if (subject.startsWith('Re:')) {
+      console.log('=== EMAIL THREADING DEBUG ===');
+      console.log('Subject:', subject);
+      console.log('To:', to);
+      console.log('In-Reply-To:', inReplyTo || 'NOT SET');
+      console.log('References:', references || 'NOT SET');
+      console.log('Threading Status:', inReplyTo ? 'SUCCESS' : 'FAILED');
+      console.log('============================');
+    }
 
     // 9. Insert into sent_emails
     // Parse to_name and to_email from the To field
