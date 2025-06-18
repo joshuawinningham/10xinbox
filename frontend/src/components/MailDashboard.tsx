@@ -339,6 +339,7 @@ export default function MailDashboard() {
 
   // Add a callback to refresh response time data
   const refreshResponseTime = () => {
+    console.log('Dispatching refreshResponseTime event');
     // Dispatch a custom event that the Dashboard can listen to
     window.dispatchEvent(new CustomEvent('refreshResponseTime'));
   };

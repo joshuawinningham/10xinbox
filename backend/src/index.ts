@@ -940,6 +940,13 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     let responseCount = 0;
     const batchSize = 10;
     
+    fastify.log.info('Starting response time calculation', {
+      userId: user_id,
+      receivedMessagesCount: receivedMessages.length,
+      dateRange: { start: start.toISO(), end: end.toISO() },
+      after, before
+    });
+    
     for (let i = 0; i < receivedMessages.length; i += batchSize) {
       const batch = receivedMessages.slice(i, i + batchSize);
       const batchResults = await Promise.all(
@@ -949,11 +956,32 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
             const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
             const receivedInternalDate = Number(res.data.internalDate);
             const threadId = res.data.threadId;
-            if (!threadId) return null;
+            if (!threadId) {
+              fastify.log.debug('No thread ID found for message', { messageId: msg.id });
+              return null;
+            }
             
             // Fetch all messages in the thread
             const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
             const threadMessages = threadRes.data.messages || [];
+            
+            fastify.log.debug('Processing thread', {
+              threadId,
+              messageId: msg.id,
+              threadMessagesCount: threadMessages.length,
+              receivedDate: new Date(receivedInternalDate).toISOString()
+            });
+            
+            // Log all messages in thread for debugging
+            threadMessages.forEach((m, index) => {
+              fastify.log.debug(`Thread message ${index}`, {
+                messageId: m.id,
+                labelIds: m.labelIds,
+                internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : 'null',
+                isSent: m.labelIds?.includes('SENT'),
+                isAfterReceived: m.internalDate ? Number(m.internalDate) > receivedInternalDate : false
+              });
+            });
             
             // Find the first reply sent by the user after the received message
             const reply = threadMessages.find((m) => {
@@ -972,12 +1000,19 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
               responseCount++;
               
               // Log for debugging
-              fastify.log.debug('Found response time', {
+              fastify.log.info('Found response time', {
                 receivedDate: new Date(receivedInternalDate).toISOString(),
                 replyDate: new Date(replyDate).toISOString(),
                 responseTimeSeconds: Math.round(responseTime / 1000),
                 threadId,
-                messageId: msg.id
+                messageId: msg.id,
+                replyMessageId: reply.id
+              });
+            } else {
+              fastify.log.debug('No reply found for message', {
+                messageId: msg.id,
+                threadId,
+                threadMessagesCount: threadMessages.length
               });
             }
             return null;
@@ -1915,6 +1950,118 @@ fastify.post('/api/auth/get-working-hours', async (request, reply) => {
     working_hours_end: data?.working_hours_end || '17:00:00',
     working_days: data?.working_days || [1, 2, 3, 4, 5]
   });
+});
+
+// Debug endpoint to test response time calculation
+fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
+  const { user_id, time_zone, day } = request.body as { user_id?: string, time_zone?: string, day?: string };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Get user's time zone from param or user_settings
+    let tz = time_zone;
+    if (!tz) {
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
+        .select('time_zone')
+        .eq('user_id', user_id)
+        .single();
+      tz = settingsRow?.time_zone || 'UTC';
+    }
+    // 4. Get date range in user's time zone
+    const now = DateTime.now().setZone(tz);
+    let start, end;
+    if (day === 'today' || !day) {
+      start = now.startOf('day');
+    } else {
+      start = now.minus({ days: 1 }).startOf('day');
+    }
+    end = start.plus({ days: 1 });
+    const after = Math.floor(start.toUTC().toSeconds());
+    const before = Math.floor(end.toUTC().toSeconds());
+    
+    // 5. Fetch all received emails for today (Inbox, not sent by me)
+    async function fetchAllMessages(q: string) {
+      let messages: any[] = [];
+      let nextPageToken: string | undefined = undefined;
+      do {
+        const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+          userId: 'me',
+          q,
+          pageToken: nextPageToken,
+          maxResults: 500,
+        });
+        if (res.data.messages) messages = messages.concat(res.data.messages);
+        nextPageToken = res.data.nextPageToken ?? undefined;
+      } while (nextPageToken);
+      return messages;
+    }
+    
+    // 6. Also fetch sent emails for comparison
+    const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
+    const sentMessages = await fetchAllMessages(`after:${after} before:${before} from:me`);
+    
+    const debugInfo = {
+      dateRange: {
+        start: start.toISO(),
+        end: end.toISO(),
+        after,
+        before
+      },
+      receivedMessagesCount: receivedMessages.length,
+      sentMessagesCount: sentMessages.length,
+      receivedMessages: receivedMessages.slice(0, 5).map(msg => ({ id: msg.id })),
+      sentMessages: sentMessages.slice(0, 5).map(msg => ({ id: msg.id })),
+      threads: [] as any[]
+    };
+    
+    // 7. Get details for first few received messages and their threads
+    for (let i = 0; i < Math.min(3, receivedMessages.length); i++) {
+      const msg = receivedMessages[i];
+      try {
+        const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
+        const threadId = res.data.threadId;
+        if (threadId) {
+          const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
+          const threadMessages = threadRes.data.messages || [];
+          
+          debugInfo.threads.push({
+            threadId,
+            originalMessageId: msg.id,
+            threadMessagesCount: threadMessages.length,
+            messages: threadMessages.map(m => ({
+              id: m.id,
+              labelIds: m.labelIds,
+              internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : null
+            }))
+          });
+        }
+      } catch (error) {
+        debugInfo.threads.push({
+          threadId: 'error',
+          originalMessageId: msg.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    
+    return reply.send(debugInfo);
+  } catch (err: any) {
+    fastify.log.error('Debug response time calculation failed', {
+      error: err.message,
+      userId: user_id,
+      stack: err.stack
+    });
+    return reply.status(500).send({ error: err.message || 'Failed to debug response time calculation' });
+  }
 });
 
 const start = async () => {
