@@ -1462,45 +1462,111 @@ fastify.post('/api/gmail/send', async (request, reply) => {
         // Extract the original subject (remove "Re: ")
         const originalSubject = subject.substring(3).trim();
         
-        // Search for the original message in the last 7 days
+        // Extract recipient email for more targeted search
+        let recipientEmail = '';
+        const toMatch = to.match(/<(.+?)>/);
+        if (toMatch) {
+          recipientEmail = toMatch[1];
+        } else {
+          recipientEmail = to.trim();
+        }
+        
+        // Search for the original message in the last 7 days with multiple strategies
         const sevenDaysAgo = Math.floor(DateTime.now().minus({ days: 7 }).toUTC().toSeconds());
         const now = Math.floor(DateTime.now().toUTC().toSeconds());
         
-        const searchRes = await gmail.users.messages.list({
-          userId: 'me',
-          q: `subject:"${originalSubject}" after:${sevenDaysAgo} before:${now} -from:me`,
-          maxResults: 10
-        });
+        let originalMessage = null;
         
-        if (searchRes.data.messages && searchRes.data.messages.length > 0) {
-          // Get the most recent matching message
-          const originalMessage = searchRes.data.messages[0];
-          if (originalMessage.id) {
-            const messageRes = await gmail.users.messages.get({
-              userId: 'me',
-              id: originalMessage.id,
-              format: 'metadata',
-              metadataHeaders: ['Message-ID', 'Subject']
+        // Strategy 1: Search by subject and from the recipient
+        if (recipientEmail) {
+          const searchRes1 = await gmail.users.messages.list({
+            userId: 'me',
+            q: `subject:"${originalSubject}" from:${recipientEmail} after:${sevenDaysAgo} before:${now} -from:me`,
+            maxResults: 5
+          });
+          
+          if (searchRes1.data.messages && searchRes1.data.messages.length > 0) {
+            originalMessage = searchRes1.data.messages[0];
+            fastify.log.info('Found original message by subject + recipient', {
+              originalMessageId: originalMessage.id,
+              subject: originalSubject,
+              recipient: recipientEmail
             });
-            
-            const headers = messageRes.data.payload?.headers || [];
-            const messageId = headers.find((h: any) => h.name?.toLowerCase() === 'message-id')?.value;
-            
-            if (messageId) {
-              inReplyTo = messageId;
-              references = messageId;
-              fastify.log.info('Found original message for reply', {
-                originalMessageId: originalMessage.id,
-                messageId: messageId,
-                subject: originalSubject
-              });
-            }
           }
+        }
+        
+        // Strategy 2: If not found, search by subject only
+        if (!originalMessage) {
+          const searchRes2 = await gmail.users.messages.list({
+            userId: 'me',
+            q: `subject:"${originalSubject}" after:${sevenDaysAgo} before:${now} -from:me`,
+            maxResults: 5
+          });
+          
+          if (searchRes2.data.messages && searchRes2.data.messages.length > 0) {
+            originalMessage = searchRes2.data.messages[0];
+            fastify.log.info('Found original message by subject only', {
+              originalMessageId: originalMessage.id,
+              subject: originalSubject
+            });
+          }
+        }
+        
+        // Strategy 3: If still not found, search by recipient in recent emails
+        if (!originalMessage && recipientEmail) {
+          const searchRes3 = await gmail.users.messages.list({
+            userId: 'me',
+            q: `from:${recipientEmail} after:${sevenDaysAgo} before:${now} -from:me`,
+            maxResults: 5
+          });
+          
+          if (searchRes3.data.messages && searchRes3.data.messages.length > 0) {
+            originalMessage = searchRes3.data.messages[0];
+            fastify.log.info('Found original message by recipient only', {
+              originalMessageId: originalMessage.id,
+              recipient: recipientEmail
+            });
+          }
+        }
+        
+        if (originalMessage && originalMessage.id) {
+          const messageRes = await gmail.users.messages.get({
+            userId: 'me',
+            id: originalMessage.id,
+            format: 'metadata',
+            metadataHeaders: ['Message-ID', 'Subject', 'From']
+          });
+          
+          const headers = messageRes.data.payload?.headers || [];
+          const messageId = headers.find((h: any) => h.name?.toLowerCase() === 'message-id')?.value;
+          
+          if (messageId) {
+            inReplyTo = messageId;
+            references = messageId;
+            fastify.log.info('Successfully linked reply to original message', {
+              originalMessageId: originalMessage.id,
+              messageId: messageId,
+              subject: originalSubject,
+              recipient: recipientEmail
+            });
+          } else {
+            fastify.log.warn('Original message found but no Message-ID header', {
+              originalMessageId: originalMessage.id,
+              subject: originalSubject
+            });
+          }
+        } else {
+          fastify.log.warn('No original message found for reply', {
+            subject: originalSubject,
+            recipient: recipientEmail,
+            searchStrategies: ['subject+recipient', 'subject', 'recipient']
+          });
         }
       } catch (error) {
         fastify.log.warn('Failed to find original message for reply', {
           error: error instanceof Error ? error.message : String(error),
-          subject: subject
+          subject: subject,
+          recipient: to
         });
       }
     }
