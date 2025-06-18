@@ -49,6 +49,9 @@ export default function Dashboard() {
       }
     };
     fetchResponseTime();
+    // Add periodic refresh every 5 minutes
+    const interval = setInterval(fetchResponseTime, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, [user?.id]);
 
   // Add event listener to refresh response time when email is sent
@@ -353,68 +356,6 @@ export default function Dashboard() {
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-2xl font-bold">Avg. Response<br />Time</CardTitle>
-            <button
-              onClick={async () => {
-                if (!user?.id) return;
-                try {
-                  console.log('Testing debug response time...');
-                  const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/debug-response-time`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: user.id }),
-                  });
-                  const data = await res.json();
-                  console.log('Debug response time data:', JSON.stringify(data, null, 2));
-                  alert('Check console for debug info');
-                } catch (err) {
-                  console.error('Debug error:', err);
-                  alert('Debug failed - check console');
-                }
-              }}
-              className="p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-              title="Debug response time"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 16v-4"/>
-                <path d="M12 8h.01"/>
-              </svg>
-            </button>
-            <button
-              onClick={async () => {
-                if (!user?.id) return;
-                setResponseLoading(true);
-                setResponseError(null);
-                try {
-                  console.log('Manually refreshing response time...');
-                  const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/response-time`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: user.id }),
-                  });
-                  if (!res.ok) throw new Error('Failed to fetch response time');
-                  const data = await res.json();
-                  console.log('Manual refresh response time data:', data);
-                  setResponseTime(data.average_response_time);
-                  setResponseCount(data.count);
-                } catch (err) {
-                  console.error('Manual refresh error:', err);
-                  setResponseError((err as Error).message);
-                } finally {
-                  setResponseLoading(false);
-                }
-              }}
-              className="p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-              title="Refresh response time"
-              disabled={responseLoading}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                <path d="M21 3v5h-5"/>
-                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                <path d="M3 21v-5h5"/>
-              </svg>
-            </button>
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-primary">
