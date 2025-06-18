@@ -337,6 +337,12 @@ export default function MailDashboard() {
     setComposeSuccess(false);
   };
 
+  // Add a callback to refresh response time data
+  const refreshResponseTime = () => {
+    // Dispatch a custom event that the Dashboard can listen to
+    window.dispatchEvent(new CustomEvent('refreshResponseTime'));
+  };
+
   return (
     <Card ref={cardRef} className="h-[90vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
       <ResizablePanelGroup direction="horizontal" className="flex w-full h-full">
@@ -689,6 +695,7 @@ export default function MailDashboard() {
                     setComposeOpen(false);
                     setComposeSuccess(false);
                   }, 1200);
+                  refreshResponseTime();
                 } catch (err: unknown) {
                   setComposeError(err instanceof Error ? err.message : 'Failed to send email');
                 } finally {
@@ -836,6 +843,7 @@ export default function MailDashboard() {
                   setComposeOpen(false);
                   setComposeSuccess(false);
                 }, 1200);
+                refreshResponseTime();
               } catch (err: unknown) {
                 setComposeError(err instanceof Error ? err.message : 'Failed to send email');
               } finally {

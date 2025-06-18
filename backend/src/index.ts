@@ -875,10 +875,16 @@ fastify.post('/api/gmail/top-senders', async (request, reply) => {
 
 // Endpoint to get average response time for today (or a given day)
 fastify.post('/api/gmail/response-time', async (request, reply) => {
-  const { user_id, time_zone, day } = request.body as { user_id?: string, time_zone?: string, day?: string };
+  const { user_id, time_zone, day, retry_count = 0 } = request.body as { user_id?: string, time_zone?: string, day?: string, retry_count?: number };
   if (!user_id) {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
+  
+  // Limit retries to prevent infinite loops
+  if (retry_count > 3) {
+    return reply.status(500).send({ error: 'Max retries exceeded for response time calculation' });
+  }
+  
   try {
     // 1. Get a valid access token
     const accessToken = await getValidAccessToken(user_id);
@@ -907,6 +913,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     end = start.plus({ days: 1 });
     const after = Math.floor(start.toUTC().toSeconds());
     const before = Math.floor(end.toUTC().toSeconds());
+    
     // 5. Fetch all received emails for today (Inbox, not sent by me)
     async function fetchAllMessages(q: string) {
       let messages: any[] = [];
@@ -927,49 +934,114 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     if (receivedMessages.length === 0) {
       return reply.send({ average_response_time: null, count: 0 });
     }
+    
     // 6. For each received message, find the first reply sent by the user in the same thread
     let totalResponseTime = 0;
     let responseCount = 0;
     const batchSize = 10;
+    
     for (let i = 0; i < receivedMessages.length; i += batchSize) {
       const batch = receivedMessages.slice(i, i + batchSize);
       const batchResults = await Promise.all(
         batch.map(async (msg) => {
-          // Get received message details
-          const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-          const receivedInternalDate = Number(res.data.internalDate);
-          const threadId = res.data.threadId;
-          if (!threadId) return null;
-          // Fetch all messages in the thread
-          const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
-          const threadMessages = threadRes.data.messages || [];
-          // Find the first reply sent by the user after the received message
-          const reply = threadMessages.find((m) => {
-            if (m.id === msg.id) return false; // skip the received message itself
-            if (m.labelIds && m.labelIds.includes('SENT')) {
-              const sentDate = Number(m.internalDate);
-              return sentDate > receivedInternalDate;
+          try {
+            // Get received message details
+            const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
+            const receivedInternalDate = Number(res.data.internalDate);
+            const threadId = res.data.threadId;
+            if (!threadId) return null;
+            
+            // Fetch all messages in the thread
+            const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
+            const threadMessages = threadRes.data.messages || [];
+            
+            // Find the first reply sent by the user after the received message
+            const reply = threadMessages.find((m) => {
+              if (m.id === msg.id) return false; // skip the received message itself
+              if (m.labelIds && m.labelIds.includes('SENT')) {
+                const sentDate = Number(m.internalDate);
+                return sentDate > receivedInternalDate;
+              }
+              return false;
+            });
+            
+            if (reply) {
+              const replyDate = Number(reply.internalDate);
+              const responseTime = replyDate - receivedInternalDate;
+              totalResponseTime += responseTime;
+              responseCount++;
+              
+              // Log for debugging
+              fastify.log.debug('Found response time', {
+                receivedDate: new Date(receivedInternalDate).toISOString(),
+                replyDate: new Date(replyDate).toISOString(),
+                responseTimeSeconds: Math.round(responseTime / 1000),
+                threadId,
+                messageId: msg.id
+              });
             }
-            return false;
-          });
-          if (reply) {
-            const replyDate = Number(reply.internalDate);
-            const responseTime = replyDate - receivedInternalDate;
-            totalResponseTime += responseTime;
-            responseCount++;
+            return null;
+          } catch (error) {
+            fastify.log.error('Error processing message for response time', {
+              error: error instanceof Error ? error.message : String(error),
+              messageId: msg.id,
+              userId: user_id
+            });
+            return null;
           }
-          return null;
         })
       );
     }
+    
+    // If no responses found and this is a retry, wait a bit and try again
+    if (responseCount === 0 && retry_count < 3) {
+      fastify.log.info('No responses found, retrying response time calculation', {
+        userId: user_id,
+        retryCount: retry_count,
+        receivedMessagesCount: receivedMessages.length
+      });
+      
+      // Wait 3 seconds before retrying
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Retry the calculation
+      const retryRes = await fetch(`${request.protocol}://${request.hostname}/api/gmail/response-time`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          user_id, 
+          time_zone: tz, 
+          day, 
+          retry_count: retry_count + 1 
+        }),
+      });
+      
+      return reply.send(await retryRes.json());
+    }
+    
     if (responseCount === 0) {
       return reply.send({ average_response_time: null, count: 0 });
     }
+    
     // Average in seconds
     const avgSeconds = Math.round(totalResponseTime / responseCount / 1000);
+    
+    fastify.log.info('Response time calculation completed', {
+      userId: user_id,
+      responseCount,
+      averageResponseTimeSeconds: avgSeconds,
+      totalResponseTimeSeconds: Math.round(totalResponseTime / 1000),
+      retryCount: retry_count
+    });
+    
     return reply.send({ average_response_time: avgSeconds, count: responseCount });
   } catch (err: any) {
-    fastify.log.error(err);
+    fastify.log.error('Response time calculation failed', {
+      error: err.message,
+      userId: user_id,
+      stack: err.stack,
+      retryCount: retry_count
+    });
     // Check for insufficient permissions error from Google
     if (err && err.errors && Array.isArray(err.errors)) {
       const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
@@ -1391,6 +1463,15 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       },
     });
 
+    // Log successful email send for debugging
+    fastify.log.info('Email sent successfully', {
+      userId: user_id,
+      emailId: email_id,
+      to: to,
+      subject: subject,
+      timestamp: new Date().toISOString()
+    });
+
     // 8. Insert into sent_emails
     // Parse to_name and to_email from the To field
     let to_name = '', to_email = '';
@@ -1412,6 +1493,20 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       body,
     });
     console.log('SENT_EMAILS INSERT:', { sentEmailData, sentEmailError });
+
+    if (sentEmailError) {
+      fastify.log.error('Failed to insert into sent_emails table', {
+        error: sentEmailError,
+        userId: user_id,
+        emailId: email_id
+      });
+    } else {
+      fastify.log.info('Email recorded in sent_emails table', {
+        userId: user_id,
+        emailId: email_id,
+        toEmail: to_email
+      });
+    }
 
     return reply.send({ success: true });
   } catch (err: any) {
