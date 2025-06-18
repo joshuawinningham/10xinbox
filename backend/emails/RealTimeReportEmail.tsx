@@ -31,12 +31,13 @@ function formatDate(dateStr: string) {
   return `${mm}-${dd}-${yyyy}`;
 }
 
-type RealTimeReportEmailProps = {
+export type RealTimeReportEmailProps = {
   date: string;
   emailsSent: number;
   emailsReceived: number;
   avgResponseTime: string | number;
-  inboxZeroBusinessDays: number;
+  inboxZeroWorkingDays: number;
+  inboxZeroStreak: number;
   consecutiveInboxZeroDays: number;
   hourlySent?: number[];
   hourlyReceived?: number[];
@@ -62,7 +63,8 @@ export default function RealTimeReportEmail({
   emailsSent,
   emailsReceived,
   avgResponseTime,
-  inboxZeroBusinessDays,
+  inboxZeroWorkingDays,
+  inboxZeroStreak,
   consecutiveInboxZeroDays,
   hourlySent,
   hourlyReceived,
@@ -127,7 +129,7 @@ export default function RealTimeReportEmail({
               <Column style={{ padding: "0 8px" }}>
                 <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
                   <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Inbox Zero Days</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>{inboxZeroBusinessDays}</Text>
+                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>{inboxZeroWorkingDays}</Text>
                 </div>
               </Column>
               <Column style={{ padding: "0 8px" }}>

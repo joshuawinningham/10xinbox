@@ -24,6 +24,7 @@ import { useSignature } from '@/hooks/useSignature';
 import { useTheme } from '@/hooks/useTheme';
 import { Mail } from 'lucide-react';
 import { RichTextEditor } from '@/components/RichTextEditor';
+import { WorkingHoursSettings } from '@/components/WorkingHoursSettings';
 
 const timezones = [
   "UTC",
@@ -227,6 +228,8 @@ export default function SettingsProfile() {
             {signatureError && <div className="text-red-500 text-xs mt-2">{signatureError}</div>}
           </CardContent>
         </Card>
+
+        <WorkingHoursSettings />
       </div>
     </div>
   );

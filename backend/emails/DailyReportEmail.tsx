@@ -36,7 +36,7 @@ export type DailyReportEmailProps = {
   emailsSent: number;
   emailsReceived: number;
   avgResponseTime: string | number;
-  inboxZeroBusinessDays: number;
+  inboxZeroWorkingDays: number;
   inboxZeroStreak: number;
   hourlySent?: number[];
   hourlyReceived?: number[];
@@ -62,7 +62,7 @@ export default function DailyReportEmail({
   emailsSent,
   emailsReceived,
   avgResponseTime,
-  inboxZeroBusinessDays,
+  inboxZeroWorkingDays,
   inboxZeroStreak,
   hourlySent,
   hourlyReceived,
@@ -129,8 +129,8 @@ export default function DailyReportEmail({
                   <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Inbox Zero Stats</Text>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
                     <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
-                      <h3 style={{ margin: '0 0 10px 0', color: '#1a1a1a', fontSize: '18px' }}>Business Days</h3>
-                      <p style={{ margin: '0', color: '#1a1a1a', fontSize: '36px', fontWeight: 'bold' }}>{inboxZeroBusinessDays}</p>
+                      <h3 style={{ margin: '0 0 10px 0', color: '#1a1a1a', fontSize: '18px' }}>Working Days</h3>
+                      <p style={{ margin: '0', color: '#1a1a1a', fontSize: '36px', fontWeight: 'bold' }}>{inboxZeroWorkingDays}</p>
                       <p style={{ margin: '5px 0 0 0', color: '#666666', fontSize: '14px' }}>Current Streak: {inboxZeroStreak} days</p>
                     </div>
                   </div>

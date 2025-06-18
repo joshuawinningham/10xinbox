@@ -64,7 +64,7 @@ export default function Dashboard() {
         });
         if (!res.ok) throw new Error('Failed to fetch inbox zero history');
         const data = await res.json();
-        // Only count business days (Mon-Fri) in the current month where inboxCount === 0
+        // Only count working days in the current month where inboxCount === 0
         const now = new Date();
         const currentYear = now.getFullYear();
         const currentMonth = now.getMonth();
@@ -74,13 +74,12 @@ export default function Dashboard() {
               return (
                 date.getFullYear() === currentYear &&
                 date.getMonth() === currentMonth &&
-                date.getDay() !== 0 && // not Sunday
-                date.getDay() !== 6    // not Saturday
+                d.isWorkingDay // Use working days from user settings
               );
             })
           : [];
-        const inboxZeroBusinessDays = daysThisMonth.filter((d: any) => d.inboxCount === 0).length;
-        setInboxZeroDays(inboxZeroBusinessDays);
+        const inboxZeroWorkingDays = daysThisMonth.filter((d: any) => d.inboxCount === 0).length;
+        setInboxZeroDays(inboxZeroWorkingDays);
       } catch (err) {
         setInboxZeroError((err as Error).message);
       } finally {
@@ -101,7 +100,7 @@ export default function Dashboard() {
         });
         if (!res.ok) throw new Error('Failed to fetch inbox zero history');
         const data = await res.json();
-        // Only consider business days (Mon-Fri) in the current month
+        // Only consider working days in the current month
         const now = new Date();
         const currentYear = now.getFullYear();
         const currentMonth = now.getMonth();
@@ -112,8 +111,7 @@ export default function Dashboard() {
               return (
                 date.getFullYear() === currentYear &&
                 date.getMonth() === currentMonth &&
-                date.getDay() !== 0 && // not Sunday
-                date.getDay() !== 6    // not Saturday
+                d.isWorkingDay // Use working days from user settings
               );
             }).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
           : [];

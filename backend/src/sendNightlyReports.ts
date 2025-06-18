@@ -119,10 +119,22 @@ async function main() {
       // Calculate basic metrics
       const emailsSent = emails.length;
 
-      // Calculate inbox zero business days and streak
-      let inboxZeroBusinessDays = 0;
+      // Calculate inbox zero working days and streak
+      let inboxZeroWorkingDays = 0;
       let inboxZeroStreak = 0;
       try {
+        // Get user's working hours settings
+        const { data: settingsData, error: settingsError } = await supabase
+          .from('user_settings')
+          .select('working_hours_start, working_hours_end, working_days')
+          .eq('user_id', user.user_id)
+          .single();
+
+        if (settingsError && settingsError.code !== 'PGRST116') { // PGRST116: No rows found
+          logger.error('Failed to fetch user settings:', { error: settingsError, userId: user.user_id });
+          throw settingsError;
+        }
+
         // Get the first day of the current month
         const firstDayOfMonth = today.startOf('month');
         
@@ -139,21 +151,27 @@ async function main() {
           throw inboxZeroError;
         }
 
-        // Filter for business days (Monday to Friday) and count inbox zero days
-        const businessDays = inboxZeroData.filter(day => {
+        // Helper function to check if a day is a working day
+        const isWorkingDay = (date: DateTime) => {
+          if (!settingsData?.working_days) return true; // Default to all days if not set
+          const dayOfWeek = date.weekday; // 1=Monday, 2=Tuesday, etc.
+          return settingsData.working_days.includes(dayOfWeek);
+        };
+
+        // Filter for working days and count inbox zero days
+        const workingDays = inboxZeroData.filter(day => {
           const date = DateTime.fromISO(day.date);
-          const dayOfWeek = date.weekday;
-          return dayOfWeek >= 1 && dayOfWeek <= 5 && day.inbox_count === 0;
+          return isWorkingDay(date) && day.inbox_count === 0;
         });
 
-        inboxZeroBusinessDays = businessDays.length;
+        inboxZeroWorkingDays = workingDays.length;
 
-        // Calculate business days streak
+        // Calculate working days streak
         let currentStreak = 0;
         let maxStreak = 0;
         let lastDate: DateTime | null = null;
 
-        for (const day of businessDays) {
+        for (const day of workingDays) {
           const currentDate = DateTime.fromISO(day.date);
           
           if (lastDate) {
@@ -174,8 +192,8 @@ async function main() {
 
         inboxZeroStreak = maxStreak;
       } catch (error) {
-        logger.error('Failed to calculate inbox zero business days or streak:', error);
-        inboxZeroBusinessDays = 0;
+        logger.error('Failed to calculate inbox zero working days or streak:', error);
+        inboxZeroWorkingDays = 0;
         inboxZeroStreak = 0;
       }
 
@@ -416,7 +434,7 @@ async function main() {
             emailsSent,
             emailsReceived,
             avgResponseTime,
-            inboxZeroBusinessDays,
+            inboxZeroWorkingDays,
             inboxZeroStreak,
             hourlySent,
             hourlyReceived,

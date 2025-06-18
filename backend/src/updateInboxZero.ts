@@ -40,6 +40,18 @@ async function updateInboxZeroData() {
           continue;
         }
 
+        // Get user's working hours settings
+        const { data: settingsData, error: settingsError } = await supabase
+          .from('user_settings')
+          .select('working_hours_start, working_hours_end, working_days')
+          .eq('user_id', user.id)
+          .single();
+
+        if (settingsError && settingsError.code !== 'PGRST116') { // PGRST116: No rows found
+          logger.error(`Failed to fetch user settings for user ${user.id}:`, settingsError);
+          continue;
+        }
+
         // Check if token needs refresh
         if (tokenData.expires_at && new Date(tokenData.expires_at) <= new Date()) {
           oauth2Client.setCredentials({
@@ -69,6 +81,19 @@ async function updateInboxZeroData() {
         const now = DateTime.now().setZone(tz);
         const startOfDay = now.startOf('day');
         const endOfDay = now.endOf('day');
+
+        // Helper function to check if today is a working day
+        const isWorkingDay = () => {
+          if (!settingsData?.working_days) return true; // Default to all days if not set
+          const dayOfWeek = now.weekday; // 1=Monday, 2=Tuesday, etc.
+          return settingsData.working_days.includes(dayOfWeek);
+        };
+
+        // Only update inbox zero data if today is a working day
+        if (!isWorkingDay()) {
+          logger.info(`Skipping inbox zero update for user ${user.id} - not a working day`);
+          continue;
+        }
 
         // Fetch messages for today
         const response = await gmail.users.messages.list({

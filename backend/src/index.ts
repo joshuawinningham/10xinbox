@@ -431,25 +431,24 @@ fastify.post('/api/report/send', async (request, reply) => {
     });
     const inboxZeroHistory = await inboxZeroRes.json();
 
-    // Calculate Inbox Zero Business Days
+    // Calculate Inbox Zero Working Days
     const nowBusiness = DateTime.now().setZone(tz);
     const currentYear = nowBusiness.year;
-    const currentMonth = nowBusiness.month - 1; // JS Date months are 0-based
-    const businessDays = inboxZeroHistory.filter((d: any) => {
+    const currentMonth = nowBusiness.month - 1;
+    const workingDays = inboxZeroHistory.filter((d: any) => {
       const date = new Date(d.date);
       return (
         date.getFullYear() === currentYear &&
         date.getMonth() === currentMonth &&
-        date.getDay() !== 0 && // not Sunday
-        date.getDay() !== 6    // not Saturday
+        d.isWorkingDay // Use working days from user settings
       );
     });
-    const inboxZeroBusinessDays = businessDays.filter((d: any) => d.inboxCount === 0).length;
+    const inboxZeroWorkingDays = workingDays.filter((d: any) => d.inboxCount === 0).length;
 
-    // Calculate Consecutive Inbox Zero Business Days
+    // Calculate Consecutive Inbox Zero Working Days
     let streak = 0;
-    for (let i = businessDays.length - 1; i >= 0; i--) {
-      if (businessDays[i].inboxCount === 0) {
+    for (let i = workingDays.length - 1; i >= 0; i--) {
+      if (workingDays[i].inboxCount === 0) {
         streak++;
       } else {
         break;
@@ -510,7 +509,8 @@ fastify.post('/api/report/send', async (request, reply) => {
         emailsSent: stats.emails_sent,
         emailsReceived: stats.emails_received,
         avgResponseTime,
-        inboxZeroBusinessDays,
+        inboxZeroWorkingDays,
+        inboxZeroStreak: consecutiveInboxZeroDays,
         consecutiveInboxZeroDays,
         hourlySent,
         hourlyReceived,
@@ -988,16 +988,33 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
   try {
-    // Get user's time zone from param or user_settings
+    // Get user's time zone and working hours from user_settings
     let tz = time_zone;
+    let workingHours = null;
     if (!tz) {
       const { data: settingsRow } = await supabase
         .from('user_settings')
-        .select('time_zone')
+        .select('time_zone, working_hours_start, working_hours_end, working_days')
         .eq('user_id', user_id)
         .single();
       tz = settingsRow?.time_zone || 'UTC';
+      workingHours = settingsRow;
+    } else {
+      // Still get working hours even if timezone is provided
+      const { data: settingsRow } = await supabase
+        .from('user_settings')
+        .select('working_hours_start, working_hours_end, working_days')
+        .eq('user_id', user_id)
+        .single();
+      workingHours = settingsRow;
     }
+
+    // Helper function to check if a day is a working day
+    const isWorkingDay = (date: DateTime) => {
+      if (!workingHours?.working_days) return true; // Default to all days if not set
+      const dayOfWeek = date.weekday; // 1=Monday, 2=Tuesday, etc.
+      return workingHours.working_days.includes(dayOfWeek);
+    };
 
     // Calculate date range
     const numDays = days && days > 0 && days <= 90 ? days : 30;
@@ -1024,7 +1041,7 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
     }
 
     // If we have gaps in the data, fetch from Gmail API for those dates
-    const results: { date: string, inboxCount: number }[] = [];
+    const results: { date: string, inboxCount: number, isWorkingDay: boolean }[] = [];
     const existingDates = new Set(inboxZeroData.map(d => d.date));
     
     // Get a valid access token for Gmail API
@@ -1042,11 +1059,17 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
         continue; // Skip invalid dates
       }
       
+      const isWorking = isWorkingDay(day);
+      
       if (existingDates.has(dateStr)) {
         // Use data from database
         const dayData = inboxZeroData.find(d => d.date === dateStr);
         if (dayData) {
-          results.push({ date: dateStr, inboxCount: dayData.inbox_count });
+          results.push({ 
+            date: dateStr, 
+            inboxCount: dayData.inbox_count,
+            isWorkingDay: isWorking
+          });
         }
       } else {
         // Fetch from Gmail API
@@ -1057,7 +1080,11 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
           q: `label:INBOX before:${before}`,
         });
         const inboxCount = res.data.resultSizeEstimate || 0;
-        results.push({ date: dateStr, inboxCount });
+        results.push({ 
+          date: dateStr, 
+          inboxCount,
+          isWorkingDay: isWorking
+        });
 
         // Store in database for future use
         await supabase
@@ -1743,6 +1770,56 @@ fastify.post('/api/auth/get-theme', async (request, reply) => {
     return reply.status(500).send({ error: error.message });
   }
   return reply.send({ theme: data?.theme || 'blue' });
+});
+
+// Endpoint to set the user's working hours
+fastify.post('/api/auth/set-working-hours', async (request, reply) => {
+  const { user_id, working_hours_start, working_hours_end, working_days } = request.body as { 
+    user_id?: string; 
+    working_hours_start?: string; 
+    working_hours_end?: string; 
+    working_days?: number[] 
+  };
+  if (!user_id || !working_hours_start || !working_hours_end || !working_days) {
+    fastify.log.error('Missing required fields in request:', { user_id, working_hours_start, working_hours_end, working_days });
+    return reply.status(400).send({ error: 'Missing required fields' });
+  }
+  fastify.log.info('Setting working hours:', { user_id, working_hours_start, working_hours_end, working_days });
+  const { error } = await supabase
+    .from('user_settings')
+    .upsert({ 
+      user_id, 
+      working_hours_start, 
+      working_hours_end, 
+      working_days 
+    }, { onConflict: 'user_id' });
+  if (error) {
+    fastify.log.error('Failed to set working hours:', error);
+    return reply.status(500).send({ error: error.message });
+  }
+  fastify.log.info('Successfully set working hours');
+  return reply.send({ success: true });
+});
+
+// Endpoint to get the user's working hours
+fastify.post('/api/auth/get-working-hours', async (request, reply) => {
+  const { user_id } = request.body as { user_id?: string };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('working_hours_start, working_hours_end, working_days')
+    .eq('user_id', user_id)
+    .single();
+  if (error) {
+    return reply.status(500).send({ error: error.message });
+  }
+  return reply.send({ 
+    working_hours_start: data?.working_hours_start || '09:00:00',
+    working_hours_end: data?.working_hours_end || '17:00:00',
+    working_days: data?.working_days || [1, 2, 3, 4, 5]
+  });
 });
 
 const start = async () => {
