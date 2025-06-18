@@ -2285,7 +2285,8 @@ fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
       sentMessages: sentMessages.slice(0, 5).map(msg => ({ id: msg.id })),
       threads: [] as any[],
       receivedEmailsWithStatus: [] as any[],
-      sentMessagesDetails: [] as any[]
+      sentMessagesDetails: [] as any[],
+      timeZoneUsed: tz
     };
     
     // 6.5. Get details for all sent messages
@@ -2328,7 +2329,7 @@ fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
       }
     }
     
-    // 7. Get details for all received messages and their response status
+    // 7. Get details for all received messages and their response status, reply match, and response time
     const receivedEmailsWithStatus = [];
     for (let i = 0; i < receivedMessages.length; i++) {
       const msg = receivedMessages[i];
@@ -2336,31 +2337,81 @@ fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
         const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
         const threadId = res.data.threadId;
         const receivedInternalDate = Number(res.data.internalDate);
+        let matchInfo: { method: string | null, replyMessageId: string | null, replyDate: string | null, responseTimeSeconds: number | null } = { method: null, replyMessageId: null, replyDate: null, responseTimeSeconds: null };
+        let threadMessagesCount = 1;
         
         if (threadId) {
           const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
           const threadMessages = threadRes.data.messages || [];
-          
-          // Find if there's a reply to this received message
+          threadMessagesCount = threadMessages.length;
+          // Try to find reply in thread
           const reply = threadMessages.find((m) => {
-            if (m.id === msg.id) return false; // skip the received message itself
+            if (m.id === msg.id) return false;
             if (m.labelIds && m.labelIds.includes('SENT')) {
               const sentDate = Number(m.internalDate);
               return sentDate > receivedInternalDate;
             }
             return false;
           });
-          
-          receivedEmailsWithStatus.push({
-            messageId: msg.id,
-            threadId,
-            receivedDate: new Date(receivedInternalDate).toISOString(),
-            threadMessagesCount: threadMessages.length,
-            hasReply: !!reply,
-            replyMessageId: reply?.id || null,
-            replyDate: reply ? new Date(Number(reply.internalDate)).toISOString() : null
-          });
+          if (reply) {
+            matchInfo = {
+              method: 'thread',
+              replyMessageId: reply.id || null,
+              replyDate: new Date(Number(reply.internalDate)).toISOString(),
+              responseTimeSeconds: Math.round((Number(reply.internalDate) - receivedInternalDate) / 1000)
+            };
+          } else {
+            // Try In-Reply-To search
+            try {
+              const searchQuery = `from:me after:${Math.floor(receivedInternalDate / 1000)} before:${Math.floor(receivedInternalDate / 1000) + 86400}`;
+              const searchRes = await gmail.users.messages.list({
+                userId: 'me',
+                q: searchQuery,
+                maxResults: 10
+              });
+              if (searchRes.data.messages) {
+                for (const sentMsg of searchRes.data.messages) {
+                  const sentMsgRes = await gmail.users.messages.get({
+                    userId: 'me',
+                    id: sentMsg.id!,
+                    format: 'metadata',
+                    metadataHeaders: ['In-Reply-To', 'References', 'Subject']
+                  });
+                  const headers = sentMsgRes.data.payload?.headers || [];
+                  const inReplyTo = headers.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value;
+                  const subject = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value;
+                  if (inReplyTo && subject?.startsWith('Re:')) {
+                    const sentDate = Number(sentMsgRes.data.internalDate);
+                    if (sentDate > receivedInternalDate) {
+                      matchInfo = {
+                        method: 'in-reply-to',
+                        replyMessageId: sentMsg.id || null,
+                        replyDate: new Date(sentDate).toISOString(),
+                        responseTimeSeconds: Math.round((sentDate - receivedInternalDate) / 1000)
+                      };
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch (searchError) {
+              // ignore
+            }
+          }
         }
+        receivedEmailsWithStatus.push({
+          messageId: msg.id,
+          threadId,
+          receivedDate: new Date(receivedInternalDate).toISOString(),
+          receivedDateLocal: DateTime.fromMillis(receivedInternalDate, { zone: tz }).toFormat('yyyy-MM-dd HH:mm:ss ZZZZ'),
+          threadMessagesCount,
+          hasReply: !!matchInfo.replyMessageId,
+          replyMessageId: matchInfo.replyMessageId,
+          replyDate: matchInfo.replyDate,
+          replyDateLocal: matchInfo.replyDate ? DateTime.fromISO(matchInfo.replyDate, { zone: tz }).toFormat('yyyy-MM-dd HH:mm:ss ZZZZ') : null,
+          responseTimeSeconds: matchInfo.responseTimeSeconds,
+          matchMethod: matchInfo.method
+        });
       } catch (error) {
         receivedEmailsWithStatus.push({
           messageId: msg.id,
@@ -2368,9 +2419,8 @@ fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
         });
       }
     }
-    
+    debugInfo.timeZoneUsed = tz;
     debugInfo.receivedEmailsWithStatus = receivedEmailsWithStatus;
-    
     return reply.send(debugInfo);
   } catch (err: any) {
     fastify.log.error('Debug response time calculation failed', {
