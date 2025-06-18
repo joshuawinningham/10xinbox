@@ -1458,6 +1458,13 @@ fastify.post('/api/gmail/send', async (request, reply) => {
     let inReplyTo = '';
     let references = '';
     if (subject.startsWith('Re:')) {
+      fastify.log.info('Processing reply email', {
+        userId: user_id,
+        subject: subject,
+        to: to,
+        timestamp: new Date().toISOString()
+      });
+      
       try {
         // Extract the original subject (remove "Re: ")
         const originalSubject = subject.substring(3).trim();
@@ -1471,6 +1478,12 @@ fastify.post('/api/gmail/send', async (request, reply) => {
           recipientEmail = to.trim();
         }
         
+        fastify.log.info('Reply search parameters', {
+          originalSubject: originalSubject,
+          recipientEmail: recipientEmail,
+          fullTo: to
+        });
+        
         // Search for the original message in the last 7 days with multiple strategies
         const sevenDaysAgo = Math.floor(DateTime.now().minus({ days: 7 }).toUTC().toSeconds());
         const now = Math.floor(DateTime.now().toUTC().toSeconds());
@@ -1479,10 +1492,18 @@ fastify.post('/api/gmail/send', async (request, reply) => {
         
         // Strategy 1: Search by subject and from the recipient
         if (recipientEmail) {
+          const searchQuery1 = `subject:"${originalSubject}" from:${recipientEmail} after:${sevenDaysAgo} before:${now} -from:me`;
+          fastify.log.info('Trying search strategy 1', { query: searchQuery1 });
+          
           const searchRes1 = await gmail.users.messages.list({
             userId: 'me',
-            q: `subject:"${originalSubject}" from:${recipientEmail} after:${sevenDaysAgo} before:${now} -from:me`,
+            q: searchQuery1,
             maxResults: 5
+          });
+          
+          fastify.log.info('Search strategy 1 results', {
+            found: searchRes1.data.messages?.length || 0,
+            messages: searchRes1.data.messages?.map(m => m.id) || []
           });
           
           if (searchRes1.data.messages && searchRes1.data.messages.length > 0) {
@@ -1497,10 +1518,18 @@ fastify.post('/api/gmail/send', async (request, reply) => {
         
         // Strategy 2: If not found, search by subject only
         if (!originalMessage) {
+          const searchQuery2 = `subject:"${originalSubject}" after:${sevenDaysAgo} before:${now} -from:me`;
+          fastify.log.info('Trying search strategy 2', { query: searchQuery2 });
+          
           const searchRes2 = await gmail.users.messages.list({
             userId: 'me',
-            q: `subject:"${originalSubject}" after:${sevenDaysAgo} before:${now} -from:me`,
+            q: searchQuery2,
             maxResults: 5
+          });
+          
+          fastify.log.info('Search strategy 2 results', {
+            found: searchRes2.data.messages?.length || 0,
+            messages: searchRes2.data.messages?.map(m => m.id) || []
           });
           
           if (searchRes2.data.messages && searchRes2.data.messages.length > 0) {
@@ -1514,10 +1543,18 @@ fastify.post('/api/gmail/send', async (request, reply) => {
         
         // Strategy 3: If still not found, search by recipient in recent emails
         if (!originalMessage && recipientEmail) {
+          const searchQuery3 = `from:${recipientEmail} after:${sevenDaysAgo} before:${now} -from:me`;
+          fastify.log.info('Trying search strategy 3', { query: searchQuery3 });
+          
           const searchRes3 = await gmail.users.messages.list({
             userId: 'me',
-            q: `from:${recipientEmail} after:${sevenDaysAgo} before:${now} -from:me`,
+            q: searchQuery3,
             maxResults: 5
+          });
+          
+          fastify.log.info('Search strategy 3 results', {
+            found: searchRes3.data.messages?.length || 0,
+            messages: searchRes3.data.messages?.map(m => m.id) || []
           });
           
           if (searchRes3.data.messages && searchRes3.data.messages.length > 0) {
@@ -1547,19 +1584,23 @@ fastify.post('/api/gmail/send', async (request, reply) => {
               originalMessageId: originalMessage.id,
               messageId: messageId,
               subject: originalSubject,
-              recipient: recipientEmail
+              recipient: recipientEmail,
+              inReplyTo: inReplyTo,
+              references: references
             });
           } else {
             fastify.log.warn('Original message found but no Message-ID header', {
               originalMessageId: originalMessage.id,
-              subject: originalSubject
+              subject: originalSubject,
+              headers: headers.map(h => ({ name: h.name, value: h.value }))
             });
           }
         } else {
           fastify.log.warn('No original message found for reply', {
             subject: originalSubject,
             recipient: recipientEmail,
-            searchStrategies: ['subject+recipient', 'subject', 'recipient']
+            searchStrategies: ['subject+recipient', 'subject', 'recipient'],
+            dateRange: { sevenDaysAgo, now }
           });
         }
       } catch (error) {
