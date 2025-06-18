@@ -1009,13 +1009,63 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
                 replyMessageId: reply.id
               });
             } else {
+              // If no reply found in thread, try searching for sent messages that might be replies
+              try {
+                const searchQuery = `from:me after:${Math.floor(receivedInternalDate / 1000)} before:${Math.floor(receivedInternalDate / 1000) + 86400}`;
+                const searchRes = await gmail.users.messages.list({
+                  userId: 'me',
+                  q: searchQuery,
+                  maxResults: 10
+                });
+                
+                if (searchRes.data.messages) {
+                  for (const sentMsg of searchRes.data.messages) {
+                    const sentMsgRes = await gmail.users.messages.get({
+                      userId: 'me',
+                      id: sentMsg.id!,
+                      format: 'metadata',
+                      metadataHeaders: ['In-Reply-To', 'References', 'Subject']
+                    });
+                    
+                    const headers = sentMsgRes.data.payload?.headers || [];
+                    const inReplyTo = headers.find((h: any) => h.name?.toLowerCase() === 'in-reply-to')?.value;
+                    const subject = headers.find((h: any) => h.name?.toLowerCase() === 'subject')?.value;
+                    
+                    // Check if this sent message is a reply to the received message
+                    if (inReplyTo && subject?.startsWith('Re:')) {
+                      const sentDate = Number(sentMsgRes.data.internalDate);
+                      if (sentDate > receivedInternalDate) {
+                        const responseTime = sentDate - receivedInternalDate;
+                        totalResponseTime += responseTime;
+                        responseCount++;
+                        
+                        fastify.log.info('Found response time via In-Reply-To search', {
+                          receivedDate: new Date(receivedInternalDate).toISOString(),
+                          replyDate: new Date(sentDate).toISOString(),
+                          responseTimeSeconds: Math.round(responseTime / 1000),
+                          threadId,
+                          messageId: msg.id,
+                          replyMessageId: sentMsg.id,
+                          inReplyTo: inReplyTo
+                        });
+                        break;
+                      }
+                    }
+                  }
+                }
+              } catch (searchError) {
+                fastify.log.debug('Failed to search for replies via In-Reply-To', {
+                  error: searchError instanceof Error ? searchError.message : String(searchError),
+                  messageId: msg.id
+                });
+              }
+              
               fastify.log.debug('No reply found for message', {
                 messageId: msg.id,
                 threadId,
                 threadMessagesCount: threadMessages.length
               });
             }
-            return null;
           } catch (error) {
             fastify.log.error('Error processing message for response time', {
               error: error instanceof Error ? error.message : String(error),
