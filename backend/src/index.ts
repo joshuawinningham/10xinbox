@@ -2080,38 +2080,52 @@ fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
       sentMessagesCount: sentMessages.length,
       receivedMessages: receivedMessages.slice(0, 5).map(msg => ({ id: msg.id })),
       sentMessages: sentMessages.slice(0, 5).map(msg => ({ id: msg.id })),
-      threads: [] as any[]
+      threads: [] as any[],
+      receivedEmailsWithStatus: [] as any[]
     };
     
-    // 7. Get details for first few received messages and their threads
-    for (let i = 0; i < Math.min(3, receivedMessages.length); i++) {
+    // 7. Get details for all received messages and their response status
+    const receivedEmailsWithStatus = [];
+    for (let i = 0; i < receivedMessages.length; i++) {
       const msg = receivedMessages[i];
       try {
         const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
         const threadId = res.data.threadId;
+        const receivedInternalDate = Number(res.data.internalDate);
+        
         if (threadId) {
           const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
           const threadMessages = threadRes.data.messages || [];
           
-          debugInfo.threads.push({
+          // Find if there's a reply to this received message
+          const reply = threadMessages.find((m) => {
+            if (m.id === msg.id) return false; // skip the received message itself
+            if (m.labelIds && m.labelIds.includes('SENT')) {
+              const sentDate = Number(m.internalDate);
+              return sentDate > receivedInternalDate;
+            }
+            return false;
+          });
+          
+          receivedEmailsWithStatus.push({
+            messageId: msg.id,
             threadId,
-            originalMessageId: msg.id,
+            receivedDate: new Date(receivedInternalDate).toISOString(),
             threadMessagesCount: threadMessages.length,
-            messages: threadMessages.map(m => ({
-              id: m.id,
-              labelIds: m.labelIds,
-              internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : null
-            }))
+            hasReply: !!reply,
+            replyMessageId: reply?.id || null,
+            replyDate: reply ? new Date(Number(reply.internalDate)).toISOString() : null
           });
         }
       } catch (error) {
-        debugInfo.threads.push({
-          threadId: 'error',
-          originalMessageId: msg.id,
+        receivedEmailsWithStatus.push({
+          messageId: msg.id,
           error: error instanceof Error ? error.message : String(error)
         });
       }
     }
+    
+    debugInfo.receivedEmailsWithStatus = receivedEmailsWithStatus;
     
     return reply.send(debugInfo);
   } catch (err: any) {
