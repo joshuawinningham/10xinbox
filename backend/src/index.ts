@@ -1028,6 +1028,13 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
       );
     }
     
+    fastify.log.info('Response time calculation completed', {
+      userId: user_id,
+      responseCount,
+      totalResponseTimeSeconds: Math.round(totalResponseTime / 1000),
+      receivedMessagesCount: receivedMessages.length
+    });
+    
     // If no responses found and this is a retry, wait a bit and try again
     if (responseCount === 0 && retry_count < 3) {
       fastify.log.info('No responses found, retrying response time calculation', {
@@ -2081,8 +2088,49 @@ fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
       receivedMessages: receivedMessages.slice(0, 5).map(msg => ({ id: msg.id })),
       sentMessages: sentMessages.slice(0, 5).map(msg => ({ id: msg.id })),
       threads: [] as any[],
-      receivedEmailsWithStatus: [] as any[]
+      receivedEmailsWithStatus: [] as any[],
+      sentMessagesDetails: [] as any[]
     };
+    
+    // 6.5. Get details for all sent messages
+    for (let i = 0; i < sentMessages.length; i++) {
+      const msg = sentMessages[i];
+      try {
+        const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
+        const sentInternalDate = Number(res.data.internalDate);
+        const threadId = res.data.threadId;
+        
+        if (threadId) {
+          const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
+          const threadMessages = threadRes.data.messages || [];
+          
+          // Find the received message this is replying to
+          const receivedMessage = threadMessages.find((m) => {
+            if (m.id === msg.id) return false; // skip the sent message itself
+            if (!m.labelIds?.includes('SENT')) {
+              const receivedDate = Number(m.internalDate);
+              return receivedDate < sentInternalDate;
+            }
+            return false;
+          });
+          
+          debugInfo.sentMessagesDetails.push({
+            messageId: msg.id,
+            threadId,
+            sentDate: new Date(sentInternalDate).toISOString(),
+            threadMessagesCount: threadMessages.length,
+            isReplyToReceived: !!receivedMessage,
+            receivedMessageId: receivedMessage?.id || null,
+            receivedDate: receivedMessage ? new Date(Number(receivedMessage.internalDate)).toISOString() : null
+          });
+        }
+      } catch (error) {
+        debugInfo.sentMessagesDetails.push({
+          messageId: msg.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
     
     // 7. Get details for all received messages and their response status
     const receivedEmailsWithStatus = [];
