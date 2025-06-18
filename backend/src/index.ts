@@ -939,6 +939,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     let totalResponseTime = 0;
     let responseCount = 0;
     const batchSize = 10;
+    const usedReplyIds = new Set(); // To prevent duplicate counting
     
     fastify.log.info('Starting response time calculation', {
       userId: user_id,
@@ -956,6 +957,10 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
             const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
             const receivedInternalDate = Number(res.data.internalDate);
             const threadId = res.data.threadId;
+            const headers = res.data.payload?.headers || [];
+            const messageIdHeader = headers.find((h) => h.name?.toLowerCase() === 'message-id');
+            const messageIdValue = messageIdHeader?.value;
+            
             if (!threadId) {
               fastify.log.debug('No thread ID found for message', { messageId: msg.id });
               return null;
@@ -969,7 +974,8 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
               threadId,
               messageId: msg.id,
               threadMessagesCount: threadMessages.length,
-              receivedDate: new Date(receivedInternalDate).toISOString()
+              receivedDate: new Date(receivedInternalDate).toISOString(),
+              messageIdValue
             });
             
             // Log all messages in thread for debugging
@@ -983,17 +989,22 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
               });
             });
             
-            // Find the first reply sent by the user after the received message
+            // Try to find reply in thread (must not be used already, and must match In-Reply-To)
             const reply = threadMessages.find((m) => {
               if (m.id === msg.id) return false; // skip the received message itself
+              if (usedReplyIds.has(m.id)) return false; // prevent duplicate counting
               if (m.labelIds && m.labelIds.includes('SENT')) {
                 const sentDate = Number(m.internalDate);
-                return sentDate > receivedInternalDate;
+                // Check In-Reply-To header to ensure it's actually a reply to this message
+                const replyHeaders = m.payload?.headers || [];
+                const inReplyTo = replyHeaders.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value;
+                return sentDate > receivedInternalDate && inReplyTo && messageIdValue && inReplyTo === messageIdValue;
               }
               return false;
             });
             
             if (reply) {
+              usedReplyIds.add(reply.id);
               const replyDate = Number(reply.internalDate);
               const responseTime = replyDate - receivedInternalDate;
               totalResponseTime += responseTime;
@@ -1008,7 +1019,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
                 messageId: msg.id,
                 replyMessageId: reply.id
               });
-            } else {
+            } else if (messageIdValue) {
               // If no reply found in thread, try searching for sent messages that might be replies
               try {
                 const searchQuery = `from:me after:${Math.floor(receivedInternalDate / 1000)} before:${Math.floor(receivedInternalDate / 1000) + 86400}`;
@@ -1020,6 +1031,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
                 
                 if (searchRes.data.messages) {
                   for (const sentMsg of searchRes.data.messages) {
+                    if (usedReplyIds.has(sentMsg.id)) continue; // prevent duplicate counting
                     const sentMsgRes = await gmail.users.messages.get({
                       userId: 'me',
                       id: sentMsg.id!,
@@ -1027,29 +1039,28 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
                       metadataHeaders: ['In-Reply-To', 'References', 'Subject']
                     });
                     
-                    const headers = sentMsgRes.data.payload?.headers || [];
-                    const inReplyTo = headers.find((h: any) => h.name?.toLowerCase() === 'in-reply-to')?.value;
-                    const subject = headers.find((h: any) => h.name?.toLowerCase() === 'subject')?.value;
+                    const replyHeaders = sentMsgRes.data.payload?.headers || [];
+                    const inReplyTo = replyHeaders.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value;
+                    const subject = replyHeaders.find((h) => h.name?.toLowerCase() === 'subject')?.value;
+                    const sentDate = Number(sentMsgRes.data.internalDate);
                     
                     // Check if this sent message is a reply to the received message
-                    if (inReplyTo && subject?.startsWith('Re:')) {
-                      const sentDate = Number(sentMsgRes.data.internalDate);
-                      if (sentDate > receivedInternalDate) {
-                        const responseTime = sentDate - receivedInternalDate;
-                        totalResponseTime += responseTime;
-                        responseCount++;
-                        
-                        fastify.log.info('Found response time via In-Reply-To search', {
-                          receivedDate: new Date(receivedInternalDate).toISOString(),
-                          replyDate: new Date(sentDate).toISOString(),
-                          responseTimeSeconds: Math.round(responseTime / 1000),
-                          threadId,
-                          messageId: msg.id,
-                          replyMessageId: sentMsg.id,
-                          inReplyTo: inReplyTo
-                        });
-                        break;
-                      }
+                    if (inReplyTo && inReplyTo === messageIdValue && subject?.startsWith('Re:') && sentDate > receivedInternalDate) {
+                      usedReplyIds.add(sentMsg.id!);
+                      const responseTime = sentDate - receivedInternalDate;
+                      totalResponseTime += responseTime;
+                      responseCount++;
+                      
+                      fastify.log.info('Found response time via In-Reply-To search', {
+                        receivedDate: new Date(receivedInternalDate).toISOString(),
+                        replyDate: new Date(sentDate).toISOString(),
+                        responseTimeSeconds: Math.round(responseTime / 1000),
+                        threadId,
+                        messageId: msg.id,
+                        replyMessageId: sentMsg.id,
+                        inReplyTo: inReplyTo
+                      });
+                      break;
                     }
                   }
                 }
@@ -1059,11 +1070,21 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
                   messageId: msg.id
                 });
               }
-              
+            }
+            
+            if (!reply && !messageIdValue) {
               fastify.log.debug('No reply found for message', {
                 messageId: msg.id,
                 threadId,
-                threadMessagesCount: threadMessages.length
+                threadMessagesCount: threadMessages.length,
+                reason: 'No Message-ID header found'
+              });
+            } else if (!reply) {
+              fastify.log.debug('No reply found for message', {
+                messageId: msg.id,
+                threadId,
+                threadMessagesCount: threadMessages.length,
+                reason: 'No matching reply found'
               });
             }
           } catch (error) {
