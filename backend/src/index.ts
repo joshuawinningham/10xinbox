@@ -1447,7 +1447,58 @@ fastify.post('/api/gmail/send', async (request, reply) => {
     console.log('[SEND EMAIL] trackingPixel:', trackingPixel);
     console.log('[SEND EMAIL] BASE_URL:', BASE_URL);
 
-    // 6. Create MIME multipart message if attachments exist
+    // 6. Check if this is a reply and get the original message ID if needed
+    let inReplyTo = '';
+    let references = '';
+    if (subject.startsWith('Re:')) {
+      try {
+        // Extract the original subject (remove "Re: ")
+        const originalSubject = subject.substring(3).trim();
+        
+        // Search for the original message in the last 7 days
+        const sevenDaysAgo = Math.floor(DateTime.now().minus({ days: 7 }).toUTC().toSeconds());
+        const now = Math.floor(DateTime.now().toUTC().toSeconds());
+        
+        const searchRes = await gmail.users.messages.list({
+          userId: 'me',
+          q: `subject:"${originalSubject}" after:${sevenDaysAgo} before:${now} -from:me`,
+          maxResults: 10
+        });
+        
+        if (searchRes.data.messages && searchRes.data.messages.length > 0) {
+          // Get the most recent matching message
+          const originalMessage = searchRes.data.messages[0];
+          if (originalMessage.id) {
+            const messageRes = await gmail.users.messages.get({
+              userId: 'me',
+              id: originalMessage.id,
+              format: 'metadata',
+              metadataHeaders: ['Message-ID', 'Subject']
+            });
+            
+            const headers = messageRes.data.payload?.headers || [];
+            const messageId = headers.find((h: any) => h.name?.toLowerCase() === 'message-id')?.value;
+            
+            if (messageId) {
+              inReplyTo = messageId;
+              references = messageId;
+              fastify.log.info('Found original message for reply', {
+                originalMessageId: originalMessage.id,
+                messageId: messageId,
+                subject: originalSubject
+              });
+            }
+          }
+        }
+      } catch (error) {
+        fastify.log.warn('Failed to find original message for reply', {
+          error: error instanceof Error ? error.message : String(error),
+          subject: subject
+        });
+      }
+    }
+
+    // 7. Create MIME multipart message if attachments exist
     let encodedMessage;
     if (attachments && attachments.length > 0) {
       const boundary = '----=_Part_' + Date.now();
@@ -1457,6 +1508,8 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       mime += `From: \"${userName}\" <${userEmail}>\r\n`;
       mime += `To: ${to}\r\n`;
       mime += `Subject: ${subject}\r\n`;
+      if (inReplyTo) mime += `In-Reply-To: ${inReplyTo}\r\n`;
+      if (references) mime += `References: ${references}\r\n`;
       mime += `\r\n--${boundary}\r\n`;
       mime += `Content-Type: text/html; charset=utf-8\r\n\r\n`;
       mime += bodyWithPixel + '\r\n';
@@ -1474,15 +1527,20 @@ fastify.post('/api/gmail/send', async (request, reply) => {
         .replace(/\//g, '_')
         .replace(/=+$/, '');
     } else {
-      const message = [
+      const messageHeaders = [
         'Content-Type: text/html; charset=utf-8',
         'MIME-Version: 1.0',
         `From: \"${userName}\" <${userEmail}>`,
         `To: ${to}`,
         `Subject: ${subject}`,
-        '',
-        bodyWithPixel,
-      ].join('\r\n');
+      ];
+      
+      if (inReplyTo) messageHeaders.push(`In-Reply-To: ${inReplyTo}`);
+      if (references) messageHeaders.push(`References: ${references}`);
+      
+      messageHeaders.push('', bodyWithPixel);
+      
+      const message = messageHeaders.join('\r\n');
       encodedMessage = Buffer.from(message)
         .toString('base64')
         .replace(/\+/g, '-')
@@ -1490,7 +1548,7 @@ fastify.post('/api/gmail/send', async (request, reply) => {
         .replace(/=+$/, '');
     }
 
-    // 7. Send the email
+    // 8. Send the email
     await gmail.users.messages.send({
       userId: 'me',
       requestBody: {
@@ -1504,10 +1562,12 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       emailId: email_id,
       to: to,
       subject: subject,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      isReply: subject.startsWith('Re:'),
+      inReplyTo: inReplyTo || 'none'
     });
 
-    // 8. Insert into sent_emails
+    // 9. Insert into sent_emails
     // Parse to_name and to_email from the To field
     let to_name = '', to_email = '';
     const match = to.match(/^(.*?)(?:\s*<(.+?)>)?$/);
