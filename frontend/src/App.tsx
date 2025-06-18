@@ -1,8 +1,13 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, Settings, Calendar, Eye, BarChart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import Dashboard from '@/pages/Dashboard';
+import SettingsLayout from '@/pages/settings/Layout';
+import SettingsProfile from '@/pages/settings/Profile';
+import CreateAccount from '@/pages/CreateAccount';
+import Login from '@/pages/Login';
 import { SidebarProfile } from '@/components/SidebarProfile';
 import ConfirmEmail from '@/pages/ConfirmEmail';
 import TopSenders from '@/pages/TopSenders';
@@ -12,12 +17,6 @@ import EmailTracking from '@/pages/EmailTracking';
 import './App.css';
 import { applyTheme } from '@/lib/theme-utils';
 import { useAuth } from '@/hooks/useAuth';
-
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const CreateAccount = lazy(() => import('./pages/CreateAccount'));
-const Login = lazy(() => import('./pages/Login'));
-const SettingsLayout = lazy(() => import('./pages/settings/Layout'));
-const SettingsProfile = lazy(() => import('./pages/settings/Profile'));
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -156,16 +155,16 @@ function App() {
     <Router>
       <Layout>
         <Routes>
-          <Route path="/" element={<PrivateRoute><Suspense fallback={<div>Loading...</div>}><Dashboard /></Suspense></PrivateRoute>} />
+          <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
           <Route path="/mail" element={<PrivateRoute><Mail /></PrivateRoute>} />
           <Route path="/top-senders" element={<PrivateRoute><TopSenders /></PrivateRoute>} />
           <Route path="/inbox-zero" element={<PrivateRoute><InboxZero /></PrivateRoute>} />
-          <Route path="/create-account" element={<Suspense fallback={<div>Loading...</div>}><CreateAccount /></Suspense>} />
-          <Route path="/login" element={<Suspense fallback={<div>Loading...</div>}><Login /></Suspense>} />
+          <Route path="/create-account" element={<CreateAccount />} />
+          <Route path="/login" element={<Login />} />
           <Route path="/confirm-email" element={<ConfirmEmail />} />
-          <Route path="/settings" element={<PrivateRoute><Suspense fallback={<div>Loading...</div>}><SettingsLayout /></Suspense></PrivateRoute>}>
+          <Route path="/settings" element={<PrivateRoute><SettingsLayout /></PrivateRoute>}>
             <Route index element={<Navigate to="/settings/profile" replace />} />
-            <Route path="profile" element={<Suspense fallback={<div>Loading...</div>}><SettingsProfile /></Suspense>} />
+            <Route path="profile" element={<SettingsProfile />} />
           </Route>
           <Route path="/email-tracking" element={<PrivateRoute><EmailTracking /></PrivateRoute>} />
         </Routes>

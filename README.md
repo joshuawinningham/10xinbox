@@ -122,15 +122,7 @@ npm run dev     # Start Vite dev server (default: http://localhost:5173)
    - `RESEND_API_KEY`
    - `BASE_URL` (should match your Render backend URL)
    - `PORT` (optional, Render sets this automatically)
-   - `REDIS_URL` (from Redis add-on)
-
-### Redis Setup (Render)
-1. In your Render dashboard, click "New +" and select "Redis"
-2. Choose a name for your Redis instance (e.g., "email-kpi-redis")
-3. Select the free plan
-4. Click "Create Redis"
-5. Once created, copy the "Internal Redis URL"
-6. Add this URL as `REDIS_URL` in your backend service's environment variables
+6. Deploy!
 
 ### Nightly Email Report Cron Job (Render)
 You can automate nightly (or hourly) email KPI reports using a Render Cron Job:

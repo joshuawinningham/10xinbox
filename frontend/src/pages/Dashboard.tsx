@@ -36,10 +36,7 @@ export default function Dashboard() {
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/response-time`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            user_id: user.id,
-            time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone 
-          }),
+          body: JSON.stringify({ user_id: user.id }),
         });
         if (!res.ok) throw new Error('Failed to fetch response time');
         const data = await res.json();
