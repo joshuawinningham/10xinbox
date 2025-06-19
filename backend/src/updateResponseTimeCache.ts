@@ -37,7 +37,7 @@ async function getValidAccessToken(user_id: string) {
   return newAccessToken;
 }
 
-async function calculateResponseTime(user_id: string, tz: string) {
+export async function calculateResponseTime(user_id: string, tz: string) {
   const accessToken = await getValidAccessToken(user_id);
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: accessToken });
