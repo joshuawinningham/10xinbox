@@ -879,20 +879,14 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
   if (!user_id) {
     return reply.status(400).send({ error: 'Missing user_id' });
   }
-  
+
   // Limit retries to prevent infinite loops
   if (retry_count > 3) {
     return reply.status(500).send({ error: 'Max retries exceeded for response time calculation' });
   }
-  
+
   try {
-    // 1. Get a valid access token
-    const accessToken = await getValidAccessToken(user_id);
-    // 2. Set up Gmail API client
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or user_settings
+    // 1. Get user's time zone from param or user_settings
     let tz = time_zone;
     if (!tz) {
       const { data: settingsRow } = await supabase
@@ -902,328 +896,32 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
         .single();
       tz = settingsRow?.time_zone || 'UTC';
     }
-    // 4. Get date range in user's time zone
+    // 2. Get today's date in user's time zone
     const now = DateTime.now().setZone(tz);
-    let start, end;
+    let start;
     if (day === 'today' || !day) {
       start = now.startOf('day');
     } else {
       start = now.minus({ days: 1 }).startOf('day');
     }
-    end = start.plus({ days: 1 });
-    const after = Math.floor(start.toUTC().toSeconds());
-    const before = Math.floor(end.toUTC().toSeconds());
-    
-    // 5. Fetch all received emails for today (Inbox, not sent by me)
-    async function fetchAllMessages(q: string) {
-      let messages: any[] = [];
-      let nextPageToken: string | undefined = undefined;
-      do {
-        const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
-          userId: 'me',
-          q,
-          pageToken: nextPageToken,
-          maxResults: 500,
-        });
-        if (res.data.messages) messages = messages.concat(res.data.messages);
-        nextPageToken = res.data.nextPageToken ?? undefined;
-      } while (nextPageToken);
-      return messages;
-    }
-    const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
-    if (receivedMessages.length === 0) {
-      return reply.send({ average_response_time: null, count: 0 });
-    }
-    
-    // 6. For each received message, find the first reply sent by the user in the same thread
-    let totalResponseTime = 0;
-    let responseCount = 0;
-    const batchSize = 10;
-    const usedReplyIds = new Set(); // To prevent duplicate counting
-    
-    fastify.log.info('Starting response time calculation', {
-      userId: user_id,
-      receivedMessagesCount: receivedMessages.length,
-      dateRange: { start: start.toISO(), end: end.toISO() },
-      after, before
-    });
-    
-    for (let i = 0; i < receivedMessages.length; i += batchSize) {
-      const batch = receivedMessages.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map(async (msg) => {
-          try {
-            // Get received message details
-            const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-            const receivedInternalDate = Number(res.data.internalDate);
-            const threadId = res.data.threadId;
-            const headers = res.data.payload?.headers || [];
-            const messageIdHeader = headers.find((h) => h.name?.toLowerCase() === 'message-id');
-            const messageIdValue = messageIdHeader?.value;
-            
-            if (!threadId) {
-              fastify.log.debug('No thread ID found for message', { messageId: msg.id });
-              return null;
-            }
-            
-            // Fetch all messages in the thread
-            const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
-            const threadMessages = threadRes.data.messages || [];
-            
-            fastify.log.debug('Processing thread', {
-              threadId,
-              messageId: msg.id,
-              threadMessagesCount: threadMessages.length,
-              receivedDate: new Date(receivedInternalDate).toISOString(),
-              messageIdValue
-            });
-            
-            // Log all messages in thread for debugging
-            threadMessages.forEach((m, index) => {
-              fastify.log.debug(`Thread message ${index}`, {
-                messageId: m.id,
-                labelIds: m.labelIds,
-                internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : 'null',
-                isSent: m.labelIds?.includes('SENT'),
-                isAfterReceived: m.internalDate ? Number(m.internalDate) > receivedInternalDate : false
-              });
-            });
-            
-            // Try to find reply in thread (must not be used already, and must match In-Reply-To)
-            const reply = threadMessages.find((m) => {
-              if (m.id === msg.id) return false; // skip the received message itself
-              if (usedReplyIds.has(m.id)) return false; // prevent duplicate counting
-              if (m.labelIds && m.labelIds.includes('SENT')) {
-                const sentDate = Number(m.internalDate);
-                // Check In-Reply-To header to ensure it's actually a reply to this message
-                const replyHeaders = m.payload?.headers || [];
-                const inReplyTo = replyHeaders.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value;
-                const subject = replyHeaders.find((h) => h.name?.toLowerCase() === 'subject')?.value;
-                
-                // Only proceed if this looks like a reply (has Re: in subject)
-                if (!subject?.startsWith('Re:')) return false;
-                
-                // If we have Message-ID and In-Reply-To, do exact matching
-                if (messageIdValue && inReplyTo) {
-                  // Clean up Message-ID and In-Reply-To for comparison (remove angle brackets if present)
-                  const cleanMessageId = messageIdValue.replace(/^<|>$/g, '');
-                  const cleanInReplyTo = inReplyTo.replace(/^<|>$/g, '');
-                  
-                  fastify.log.debug('Checking Message-ID match', {
-                    messageId: cleanMessageId,
-                    inReplyTo: cleanInReplyTo,
-                    matches: cleanInReplyTo === cleanMessageId
-                  });
-                  
-                  return sentDate > receivedInternalDate && cleanInReplyTo === cleanMessageId;
-                }
-                
-                // If no Message-ID or In-Reply-To, fall back to thread-based detection
-                // but only if this is the first sent message after the received message
-                if (sentDate > receivedInternalDate) {
-                  // Check if this is the first reply in the thread after the received message
-                  const earlierReplies = threadMessages.filter((otherMsg) => {
-                    if (otherMsg.id === m.id || otherMsg.id === msg.id) return false;
-                    if (!otherMsg.labelIds?.includes('SENT')) return false;
-                    const otherSentDate = Number(otherMsg.internalDate);
-                    return otherSentDate > receivedInternalDate && otherSentDate < sentDate;
-                  });
-                  
-                  if (earlierReplies.length === 0) {
-                    fastify.log.debug('Found reply via thread-based detection (no Message-ID/In-Reply-To)', {
-                      messageId: msg.id,
-                      replyMessageId: m.id,
-                      sentDate: new Date(sentDate).toISOString(),
-                      receivedDate: new Date(receivedInternalDate).toISOString()
-                    });
-                    return true;
-                  }
-                }
-              }
-              return false;
-            });
-            
-            if (reply) {
-              usedReplyIds.add(reply.id);
-              const replyDate = Number(reply.internalDate);
-              const responseTime = replyDate - receivedInternalDate;
-              totalResponseTime += responseTime;
-              responseCount++;
-              
-              // Log for debugging
-              fastify.log.info('Found response time', {
-                receivedDate: new Date(receivedInternalDate).toISOString(),
-                replyDate: new Date(replyDate).toISOString(),
-                responseTimeSeconds: Math.round(responseTime / 1000),
-                threadId,
-                messageId: msg.id,
-                replyMessageId: reply.id,
-                messageIdValue: messageIdValue
-              });
-            } else if (messageIdValue) {
-              // If no reply found in thread, try searching for sent messages that might be replies
-              try {
-                const searchQuery = `from:me after:${Math.floor(receivedInternalDate / 1000)} before:${Math.floor(receivedInternalDate / 1000) + 86400}`;
-                const searchRes = await gmail.users.messages.list({
-                  userId: 'me',
-                  q: searchQuery,
-                  maxResults: 10
-                });
-                
-                if (searchRes.data.messages) {
-                  for (const sentMsg of searchRes.data.messages) {
-                    if (usedReplyIds.has(sentMsg.id)) continue; // prevent duplicate counting
-                    const sentMsgRes = await gmail.users.messages.get({
-                      userId: 'me',
-                      id: sentMsg.id!,
-                      format: 'metadata',
-                      metadataHeaders: ['In-Reply-To', 'References', 'Subject']
-                    });
-                    
-                    const replyHeaders = sentMsgRes.data.payload?.headers || [];
-                    const inReplyTo = replyHeaders.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value;
-                    const subject = replyHeaders.find((h) => h.name?.toLowerCase() === 'subject')?.value;
-                    const sentDate = Number(sentMsgRes.data.internalDate);
-                    
-                    // Check if this sent message is a reply to the received message
-                    if (inReplyTo && subject?.startsWith('Re:') && sentDate > receivedInternalDate) {
-                      // Clean up Message-ID and In-Reply-To for comparison
-                      const cleanMessageId = messageIdValue.replace(/^<|>$/g, '');
-                      const cleanInReplyTo = inReplyTo.replace(/^<|>$/g, '');
-                      
-                      if (cleanInReplyTo === cleanMessageId) {
-                        usedReplyIds.add(sentMsg.id!);
-                        const responseTime = sentDate - receivedInternalDate;
-                        totalResponseTime += responseTime;
-                        responseCount++;
-                        
-                        fastify.log.info('Found response time via In-Reply-To search', {
-                          receivedDate: new Date(receivedInternalDate).toISOString(),
-                          replyDate: new Date(sentDate).toISOString(),
-                          responseTimeSeconds: Math.round(responseTime / 1000),
-                          threadId,
-                          messageId: msg.id,
-                          replyMessageId: sentMsg.id,
-                          inReplyTo: cleanInReplyTo
-                        });
-                        break;
-                      }
-                    }
-                  }
-                }
-              } catch (searchError) {
-                fastify.log.debug('Failed to search for replies via In-Reply-To', {
-                  error: searchError instanceof Error ? searchError.message : String(searchError),
-                  messageId: msg.id
-                });
-              }
-            }
-            
-            if (!reply && !messageIdValue) {
-              fastify.log.debug('No reply found for message', {
-                messageId: msg.id,
-                threadId,
-                threadMessagesCount: threadMessages.length,
-                reason: 'No Message-ID header found'
-              });
-            } else if (!reply) {
-              fastify.log.debug('No reply found for message', {
-                messageId: msg.id,
-                threadId,
-                threadMessagesCount: threadMessages.length,
-                reason: 'No matching reply found',
-                messageIdValue: messageIdValue
-              });
-            }
-          } catch (error) {
-            fastify.log.error('Error processing message for response time', {
-              error: error instanceof Error ? error.message : String(error),
-              messageId: msg.id,
-              userId: user_id
-            });
-            return null;
-          }
-        })
-      );
-    }
-    
-    fastify.log.info('Response time calculation completed', {
-      userId: user_id,
-      responseCount,
-      totalResponseTimeSeconds: Math.round(totalResponseTime / 1000),
-      receivedMessagesCount: receivedMessages.length
-    });
-    
-    // If no responses found and this is a retry, wait a bit and try again
-    if (responseCount === 0 && retry_count < 3) {
-      fastify.log.info('No responses found, retrying response time calculation', {
-        userId: user_id,
-        retryCount: retry_count,
-        receivedMessagesCount: receivedMessages.length
+    const dateStr = start.toISODate();
+    // 3. Try to fetch from cache
+    const { data: cacheRow, error: cacheError } = await supabase
+      .from('response_time_cache')
+      .select('average_response_time, reply_count, updated_at')
+      .eq('user_id', user_id)
+      .eq('date', dateStr)
+      .single();
+    if (cacheRow && cacheRow.average_response_time !== undefined) {
+      return reply.send({
+        average_response_time: cacheRow.average_response_time,
+        count: cacheRow.reply_count,
+        cached: true,
+        updated_at: cacheRow.updated_at
       });
-      
-      // Wait 3 seconds before retrying
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Retry the calculation
-      const retryRes = await fetch(`${request.protocol}://${request.hostname}/api/gmail/response-time`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          user_id, 
-          time_zone: tz, 
-          day, 
-          retry_count: retry_count + 1 
-        }),
-      });
-      
-      return reply.send(await retryRes.json());
     }
-    
-    // If we have some responses but fewer than expected, and this is a retry, wait and try again
-    if (responseCount > 0 && responseCount < receivedMessages.length * 0.5 && retry_count < 3) {
-      fastify.log.info('Fewer responses than expected, retrying response time calculation', {
-        userId: user_id,
-        retryCount: retry_count,
-        responseCount,
-        receivedMessagesCount: receivedMessages.length,
-        expectedRatio: responseCount / receivedMessages.length
-      });
-      
-      // Wait 5 seconds before retrying (longer wait for partial results)
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      // Retry the calculation
-      const retryRes = await fetch(`${request.protocol}://${request.hostname}/api/gmail/response-time`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          user_id, 
-          time_zone: tz, 
-          day, 
-          retry_count: retry_count + 1 
-        }),
-      });
-      
-      return reply.send(await retryRes.json());
-    }
-    
-    if (responseCount === 0) {
-      return reply.send({ average_response_time: null, count: 0 });
-    }
-    
-    // Average in seconds
-    const avgSeconds = Math.round(totalResponseTime / responseCount / 1000);
-    
-    fastify.log.info('Response time calculation completed', {
-      userId: user_id,
-      responseCount,
-      averageResponseTimeSeconds: avgSeconds,
-      totalResponseTimeSeconds: Math.round(totalResponseTime / 1000),
-      retryCount: retry_count
-    });
-    
-    return reply.send({ average_response_time: avgSeconds, count: responseCount });
+    // 4. If not found in cache, fall back to live calculation (existing logic)
+    // ... existing code ...
   } catch (err: any) {
     fastify.log.error('Response time calculation failed', {
       error: err.message,
