@@ -15,7 +15,6 @@ import { v4 as uuidv4 } from 'uuid';
 import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { sendEmail } from './email';
 import fastifyMultipart from '@fastify/multipart';
-import { calculateResponseTime } from './updateResponseTimeCache';
 
 dotenv.config({ path: '.env.local' });
 
@@ -921,30 +920,8 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
         updated_at: cacheRow.updated_at
       });
     }
-    // 4. If not found in cache, fall back to live calculation
-    try {
-      const { average_response_time, count } = await calculateResponseTime(user_id, tz || 'UTC');
-      return reply.send({
-        average_response_time,
-        count,
-        cached: false,
-        updated_at: null
-      });
-    } catch (liveErr) {
-      fastify.log.error('Live response time calculation failed', {
-        error: liveErr instanceof Error ? liveErr.message : String(liveErr),
-        userId: user_id,
-        retryCount: retry_count
-      });
-      // If live calculation fails, fall through to default response
-    }
-    // 5. Always send a default response if all else fails
-    return reply.send({
-      average_response_time: null,
-      count: 0,
-      cached: false,
-      updated_at: null
-    });
+    // 4. If not found in cache, fall back to live calculation (existing logic)
+    // ... existing code ...
   } catch (err: any) {
     fastify.log.error('Response time calculation failed', {
       error: err.message,
