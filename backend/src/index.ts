@@ -1104,8 +1104,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
                           threadId,
                           messageId: msg.id,
                           replyMessageId: sentMsg.id,
-                          inReplyTo: cleanInReplyTo,
-                          messageId: cleanMessageId
+                          inReplyTo: cleanInReplyTo
                         });
                         break;
                       }
