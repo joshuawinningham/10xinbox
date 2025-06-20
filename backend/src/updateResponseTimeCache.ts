@@ -44,6 +44,7 @@ export async function calculateResponseTime(
     });
   
     const sentMessages = sentRes.data.messages || [];
+    console.log(`[DEBUG] Found ${sentMessages.length} sent messages for user ${user_id} on ${startOfDay.toISO()}-${endOfDay.toISO()}`);
     if (sentMessages.length === 0) {
       return { average_response_time: null, count: 0 };
     }
@@ -65,6 +66,7 @@ export async function calculateResponseTime(
           const headers = msgRes.data.payload?.headers;
           const hasInReplyTo = headers?.some(h => h.name?.toLowerCase() === 'in-reply-to');
           const hasReferences = headers?.some(h => h.name?.toLowerCase() === 'references');
+          console.log(`[DEBUG] Sent message ${sentMsg.id}: hasInReplyTo=${hasInReplyTo}, hasReferences=${hasReferences}`);
   
           if (hasInReplyTo || hasReferences) {
               const threadRes = await gmail.users.threads.get({
@@ -74,8 +76,12 @@ export async function calculateResponseTime(
               });
   
               const threadMessages = threadRes.data.messages || [];
+              console.log(`[DEBUG] Thread ${sentMsg.threadId} has ${threadMessages.length} messages`);
               const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
-              if (!currentSentMessage || !currentSentMessage.internalDate) continue;
+              if (!currentSentMessage || !currentSentMessage.internalDate) {
+                console.log(`[DEBUG] Skipping sent message ${sentMsg.id}: cannot find in thread or missing internalDate`);
+                continue;
+              }
   
               const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
   
@@ -91,20 +97,27 @@ export async function calculateResponseTime(
               if (originalMessage && originalMessage.internalDate) {
                   const fromHeader = originalMessage.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
                   const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
-                  
-                  // Make sure we are replying to someone else
                   if(fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase()){
                     const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
                     const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
                     if (diffSeconds >= 0) {
                         totalResponseTime += diffSeconds;
                         responseCount++;
+                        console.log(`[DEBUG] Counted reply: sentMsg=${sentMsg.id}, originalMsg=${originalMessage.id}, diffSeconds=${diffSeconds}`);
+                    } else {
+                        console.log(`[DEBUG] Skipped: Negative diffSeconds for sentMsg=${sentMsg.id}, originalMsg=${originalMessage.id}`);
                     }
+                  } else {
+                    console.log(`[DEBUG] Skipped: original message from self or missing fromEmail for sentMsg=${sentMsg.id}`);
                   }
+              } else {
+                console.log(`[DEBUG] Skipped: No original message found for sentMsg=${sentMsg.id}`);
               }
+          } else {
+            console.log(`[DEBUG] Skipped: Not a reply (no In-Reply-To or References) for sentMsg=${sentMsg.id}`);
           }
       } catch(error) {
-          console.error('Error processing message for response time:', {
+          console.error('[DEBUG] Error processing message for response time:', {
               messageId: sentMsg.id,
               error: error instanceof Error ? error.message : String(error),
           });
