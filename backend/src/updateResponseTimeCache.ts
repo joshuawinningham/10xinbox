@@ -47,12 +47,12 @@ export async function calculateResponseTime(user_id: string, tz: string) {
   // Get sent emails that are replies from the sent_emails table
   const { data: sentEmails, error: sentEmailsError } = await supabase
     .from('sent_emails')
-    .select('gmail_message_id, sent_at')
+    .select('in_reply_to, sent_at')
     .eq('user_id', user_id)
     .eq('is_reply', true)
     .gte('sent_at', dateStr)
     .lt('sent_at', nextDay)
-    .not('gmail_message_id', 'is', null); // Only get emails with Gmail message IDs
+    .not('in_reply_to', 'is', null);
 
   if (sentEmailsError) {
     throw new Error(`Failed to fetch sent emails: ${sentEmailsError.message}`);
@@ -74,20 +74,9 @@ export async function calculateResponseTime(user_id: string, tz: string) {
   // For each reply, get the original message it's replying to
   for (const email of sentEmails) {
     try {
-      if (!email.gmail_message_id) continue;
+      if (!email.in_reply_to) continue;
 
-      const msgRes = await gmail.users.messages.get({
-        userId: 'me',
-        id: email.gmail_message_id,
-        format: 'metadata',
-        metadataHeaders: ['In-Reply-To', 'References']
-      });
-
-      const inReplyTo = msgRes.data.payload?.headers?.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
-      if (!inReplyTo) continue;
-
-      // Get the original message
-      const originalMsgId = inReplyTo.replace(/[<>]/g, '');
+      const originalMsgId = email.in_reply_to.replace(/[<>]/g, '');
       const originalMsgRes = await gmail.users.messages.get({
         userId: 'me',
         id: originalMsgId,
@@ -106,13 +95,16 @@ export async function calculateResponseTime(user_id: string, tz: string) {
         responseCount++;
       }
     } catch (error) {
-      console.error('Error processing email:', error);
+      console.error('Error processing email for response time:', {
+        in_reply_to: email.in_reply_to,
+        error: error instanceof Error ? error.message : String(error)
+      });
       continue;
     }
   }
 
   return {
-    average_response_time: responseCount > 0 ? totalResponseTime / responseCount : null,
+    average_response_time: responseCount > 0 ? (totalResponseTime / responseCount) / 1000 : null, // Return seconds
     count: responseCount
   };
 }

@@ -42,7 +42,7 @@ export default function Dashboard() {
     })
       .then(res => res.json())
       .then(data => {
-        setResponseTime(data.average_response_time ? Math.round(data.average_response_time / 1000) : null);
+        setResponseTime(data.average_response_time);
         setResponseCount(data.count || 0);
         setResponseError(null);
       })
@@ -78,7 +78,7 @@ export default function Dashboard() {
             if (!res.ok) throw new Error('Failed to fetch response time');
             const data = await res.json();
             console.log('Response time data received:', data);
-            setResponseTime(data.average_response_time ? Math.round(data.average_response_time / 1000) : null);
+            setResponseTime(data.average_response_time);
             setResponseCount(data.count || 0);
           } catch (err) {
             console.error('Error fetching response time:', err);
