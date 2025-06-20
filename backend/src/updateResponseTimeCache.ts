@@ -81,21 +81,25 @@ export async function calculateResponseTime(
   
               const originalMessage = threadMessages
                 .filter(m => {
-                    if (m.id === sentMsg.id || !m.internalDate || parseInt(m.internalDate, 10) >= sentTimestamp) {
+                    if (m.id === sentMsg.id || !m.internalDate) {
                         return false;
                     }
-                    const fromHeader = m.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
-                    const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
-                    return fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase();
+                    return parseInt(m.internalDate, 10) < sentTimestamp;
                 })
                 .sort((a, b) => parseInt(b.internalDate!, 10) - parseInt(a.internalDate!, 10))[0];
   
               if (originalMessage && originalMessage.internalDate) {
-                  const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
-                  const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
-                  if (diffSeconds >= 0) {
-                      totalResponseTime += diffSeconds;
-                      responseCount++;
+                  const fromHeader = originalMessage.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
+                  const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
+                  
+                  // Make sure we are replying to someone else
+                  if(fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase()){
+                    const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
+                    const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
+                    if (diffSeconds >= 0) {
+                        totalResponseTime += diffSeconds;
+                        responseCount++;
+                    }
                   }
               }
           }
