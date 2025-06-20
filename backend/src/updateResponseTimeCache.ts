@@ -61,50 +61,50 @@ export async function calculateResponseTime(user_id: string, tz: string) {
   let totalResponseTime = 0;
   let responseCount = 0;
 
-  // 2. For each sent message, check if it's a reply and calculate response time
-  for (const message of sentMessages) {
+  // 2. For each sent message, get its thread and find the message it replied to.
+  for (const sentMsg of sentMessages) {
     try {
-      if (!message.id) continue;
+      if (!sentMsg.id || !sentMsg.threadId) continue;
 
-      const msgRes = await gmail.users.messages.get({
+      // Get the full thread
+      const threadRes = await gmail.users.threads.get({
         userId: 'me',
-        id: message.id,
-        format: 'metadata',
-        metadataHeaders: ['In-Reply-To', 'Date'],
+        id: sentMsg.threadId,
       });
+
+      const threadMessages = threadRes.data.messages || [];
       
-      const headers = msgRes.data.payload?.headers || [];
-      const inReplyTo = headers.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
-      const sentDateHeader = headers.find(h => h.name?.toLowerCase() === 'date')?.value;
+      // Find our sent message in the thread to get its internalDate
+      const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
+      if (!currentSentMessage || !currentSentMessage.internalDate) continue;
 
-      if (!inReplyTo || !sentDateHeader) {
-        continue; // Not a reply we can process
+      const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
+
+      // Find the latest message in the thread that was received *before* our sent message
+      const originalMessage = threadMessages
+        .filter(m => 
+          m.id !== sentMsg.id && 
+          !m.labelIds?.includes('SENT') && 
+          m.internalDate &&
+          parseInt(m.internalDate, 10) < sentTimestamp
+        )
+        .sort((a, b) => parseInt(b.internalDate!, 10) - parseInt(a.internalDate!, 10))[0];
+
+      if (originalMessage && originalMessage.internalDate) {
+        const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
+        
+        // We have a match, calculate response time in seconds
+        const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
+        if (diffSeconds > 0) {
+          totalResponseTime += diffSeconds;
+          responseCount++;
+        }
       }
 
-      // 3. Fetch the original message
-      const originalMsgId = inReplyTo.replace(/[<>]/g, '');
-      const originalMsgRes = await gmail.users.messages.get({
-        userId: 'me',
-        id: originalMsgId,
-        format: 'metadata',
-        metadataHeaders: ['Date'],
-      });
-
-      const originalDateHeader = originalMsgRes.data.payload?.headers?.find(h => h.name?.toLowerCase() === 'date')?.value;
-      if (!originalDateHeader) continue;
-
-      // 4. Calculate the time difference
-      const receivedTime = new Date(originalDateHeader).getTime();
-      const sentTime = new Date(sentDateHeader).getTime();
-
-      if (sentTime > receivedTime) {
-        const diffSeconds = Math.round((sentTime - receivedTime) / 1000);
-        totalResponseTime += diffSeconds;
-        responseCount++;
-      }
     } catch (error) {
-      console.error('Error processing email for response time:', {
-        messageId: message.id,
+      console.error('Error processing thread for response time:', {
+        messageId: sentMsg.id,
+        threadId: sentMsg.threadId,
         error: error instanceof Error ? error.message : String(error),
       });
       continue;
