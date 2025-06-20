@@ -27,7 +27,7 @@ export async function calculateResponseTime(
     const startOfDay = (day === 'today' ? now : now.minus({ days: 1 })).startOf('day');
     const endOfDay = startOfDay.endOf('day');
 
-    const gmailQuery = `from:me after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(endOfDay.toSeconds())}`;
+    const gmailQuery = `in:sent after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(endOfDay.toSeconds())}`;
 
     const { data: tokenData } = await supabase
         .from('gmail_tokens')
@@ -69,7 +69,7 @@ export async function calculateResponseTime(
           const hasInReplyTo = headers?.some(h => h.name?.toLowerCase() === 'in-reply-to');
           const hasReferences = headers?.some(h => h.name?.toLowerCase() === 'references');
   
-          if (hasInReplyTo || hasReferences) {
+          if ((hasInReplyTo || hasReferences) && subject.startsWith('Re:')) {
               console.log(`[REPLY-DEBUG] Potential reply found - Subject: "${subject}", ID: ${sentMsg.id}`);
               const inReplyToHeader = headers?.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
               let originalMessageId = null;
