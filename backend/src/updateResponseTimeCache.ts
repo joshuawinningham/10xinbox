@@ -27,6 +27,10 @@ export async function calculateResponseTime(
     const startOfDay = (day === 'today' ? now : now.minus({ days: 1 })).startOf('day');
     const endOfDay = startOfDay.endOf('day');
 
+    console.log(`[DEBUG] Query window: startOfDay=${startOfDay.toISO()} (${startOfDay.toSeconds()}), endOfDay=${endOfDay.toISO()} (${endOfDay.toSeconds()})`);
+    const gmailQuery = `from:me after:${startOfDay.toSeconds()} before:${endOfDay.toSeconds()}`;
+    console.log(`[DEBUG] Gmail query: ${gmailQuery}`);
+
     const { data: tokenData } = await supabase
         .from('gmail_tokens')
         .select('email')
@@ -39,7 +43,7 @@ export async function calculateResponseTime(
   
     const sentRes = await gmail.users.messages.list({
       userId: 'me',
-      q: `from:me after:${startOfDay.toSeconds()} before:${endOfDay.toSeconds()}`,
+      q: gmailQuery,
       maxResults: 100, // Limit to 100 sent messages to avoid huge loops
     });
   
