@@ -856,34 +856,33 @@ fastify.post('/api/gmail/top-senders', async (request, reply) => {
 
 // Endpoint to get average response time for today (or a given day)
 fastify.post('/api/gmail/response-time', async (request, reply) => {
-    const { user_id, time_zone, day = 'today' } = request.body as { user_id?: string, time_zone?: string, day?: 'today' | 'yesterday' };
+    const { user_id, time_zone, day } = request.body as { user_id?: string, time_zone?: string, day?: 'today' | 'yesterday' };
     if (!user_id) {
       return reply.status(400).send({ error: 'Missing user_id' });
     }
     try {
-      // Use user's timezone to determine the correct date for the cache key
-      let tz = time_zone;
-      if (!tz) {
-        const { data: settingsRow } = await supabase.from('user_settings').select('time_zone').eq('user_id', user_id).single();
-        tz = settingsRow?.time_zone || 'UTC';
-      }
-      const date = DateTime.now().setZone(tz).startOf('day').toISODate();
+      const tz = time_zone || 'UTC';
+      const date = DateTime.now().setZone(tz).toISODate();
+      const cacheKey = `response-time:${user_id}:${date}:${day || 'today'}`;
 
-      // Check for cached value for the correct date
-      if (date) {
-        const { data: cache } = await supabase
-          .from('response_time_cache')
-          .select('average_response_time, reply_count, updated_at')
-          .eq('user_id', user_id)
-          .eq('date', date)
-          .single();
-    
-        if (cache && new Date().getTime() - new Date(cache.updated_at).getTime() < 300000) { // 5-minute cache
-          return reply.send({
-            average_response_time: cache.average_response_time,
-            reply_count: cache.reply_count,
-          });
-        }
+      const { data: cachedData, error: cacheError } = await supabase
+        .from('kv_store')
+        .select('average_response_time, reply_count, updated_at')
+        .eq('user_id', user_id)
+        .eq('date', date)
+        .eq('day', day)
+        .single();
+
+      if (cacheError) {
+        fastify.log.error('Failed to fetch cached response time:', cacheError);
+        return reply.status(500).send({ error: 'Failed to fetch cached response time' });
+      }
+
+      if (cachedData && new Date().getTime() - new Date(cachedData.updated_at).getTime() < 300000) { // 5-minute cache
+        return reply.send({
+          average_response_time: cachedData.average_response_time,
+          reply_count: cachedData.reply_count,
+        });
       }
   
       const accessToken = await getValidAccessToken(user_id);
@@ -895,13 +894,14 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
       
       // Update cache with the date
       if (date) {
-        await supabase.from('response_time_cache').upsert({
+        await supabase.from('kv_store').upsert({
           user_id,
           date,
+          day,
           average_response_time,
           reply_count: count,
           updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id,date' });
+        }, { onConflict: 'user_id,date,day' });
       }
   
       reply.send({ average_response_time, reply_count: count });
