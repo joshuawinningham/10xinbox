@@ -61,14 +61,16 @@ export async function calculateResponseTime(
               userId: 'me',
               id: sentMsg.id,
               format: 'metadata',
-              metadataHeaders: ['In-Reply-To', 'References']
+              metadataHeaders: ['In-Reply-To', 'References', 'Subject']
           });
   
           const headers = msgRes.data.payload?.headers;
+          const subject = headers?.find((h: any) => h.name?.toLowerCase() === 'subject')?.value || 'No Subject';
           const hasInReplyTo = headers?.some(h => h.name?.toLowerCase() === 'in-reply-to');
           const hasReferences = headers?.some(h => h.name?.toLowerCase() === 'references');
   
           if (hasInReplyTo || hasReferences) {
+              console.log(`[REPLY-DEBUG] Potential reply found - Subject: "${subject}", ID: ${sentMsg.id}`);
               const inReplyToHeader = headers?.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
               let originalMessageId = null;
               
