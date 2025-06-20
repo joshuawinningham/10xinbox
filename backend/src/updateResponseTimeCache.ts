@@ -73,58 +73,123 @@ export async function calculateResponseTime(
           console.log(`[DEBUG] Sent message ${sentMsg.id}: hasInReplyTo=${hasInReplyTo}, hasReferences=${hasReferences}`);
   
           if (hasInReplyTo || hasReferences) {
-              const threadRes = await gmail.users.threads.get({
-                  userId: 'me',
-                  id: sentMsg.threadId,
-                  format: 'full' 
-              });
-  
-              const threadMessages = threadRes.data.messages || [];
-              console.log(`[DEBUG] Thread ${sentMsg.threadId} has ${threadMessages.length} messages`);
+              // Get the original message ID from In-Reply-To header
+              const inReplyToHeader = headers?.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
+              let originalMessageId = null;
               
-              // Log details of all messages in the thread
-              threadMessages.forEach((msg, index) => {
-                const fromHeader = msg.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
-                const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
-                const date = msg.internalDate ? new Date(parseInt(msg.internalDate, 10)).toISOString() : 'unknown';
-                console.log(`[DEBUG] Thread message ${index}: id=${msg.id}, from=${fromEmail}, date=${date}, isCurrentSent=${msg.id === sentMsg.id}`);
-              });
-              
-              const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
-              if (!currentSentMessage || !currentSentMessage.internalDate) {
-                console.log(`[DEBUG] Skipping sent message ${sentMsg.id}: cannot find in thread or missing internalDate`);
-                continue;
+              if (inReplyToHeader) {
+                // Extract message ID from In-Reply-To header (format: <message-id>)
+                const match = inReplyToHeader.match(/<([^>]+)>/);
+                if (match) {
+                  originalMessageId = match[1];
+                }
               }
-  
-              const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
-  
-              const originalMessage = threadMessages
-                .filter(m => {
-                    if (m.id === sentMsg.id || !m.internalDate) {
-                        return false;
+              
+              console.log(`[DEBUG] In-Reply-To header: ${inReplyToHeader}, extracted message ID: ${originalMessageId}`);
+              
+              if (originalMessageId) {
+                try {
+                  // Try to fetch the original message directly
+                  const originalMsgRes = await gmail.users.messages.get({
+                    userId: 'me',
+                    id: originalMessageId,
+                    format: 'metadata',
+                    metadataHeaders: ['From']
+                  });
+                  
+                  const originalFromHeader = originalMsgRes.data.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
+                  const originalFromEmail = originalFromHeader ? extractEmail(originalFromHeader) : null;
+                  
+                  console.log(`[DEBUG] Original message ${originalMessageId}: from=${originalFromEmail}`);
+                  
+                  if (originalFromEmail && originalFromEmail.toLowerCase() !== userEmail.toLowerCase()) {
+                    // Get the current sent message from the thread
+                    const threadRes = await gmail.users.threads.get({
+                      userId: 'me',
+                      id: sentMsg.threadId,
+                      format: 'full' 
+                    });
+                    const threadMessages = threadRes.data.messages || [];
+                    const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
+                    
+                    if (!currentSentMessage || !currentSentMessage.internalDate) {
+                      console.log(`[DEBUG] Skipping sent message ${sentMsg.id}: cannot find in thread or missing internalDate`);
+                      continue;
                     }
-                    return parseInt(m.internalDate, 10) < sentTimestamp;
-                })
-                .sort((a, b) => parseInt(b.internalDate!, 10) - parseInt(a.internalDate!, 10))[0];
-  
-              if (originalMessage && originalMessage.internalDate) {
-                  const fromHeader = originalMessage.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
-                  const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
-                  if(fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase()){
-                    const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
+                    
+                    const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
+                    const receivedTimestamp = parseInt(originalMsgRes.data.internalDate!, 10);
                     const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
+                    
                     if (diffSeconds >= 0) {
-                        totalResponseTime += diffSeconds;
-                        responseCount++;
-                        console.log(`[DEBUG] Counted reply: sentMsg=${sentMsg.id}, originalMsg=${originalMessage.id}, diffSeconds=${diffSeconds}`);
+                      totalResponseTime += diffSeconds;
+                      responseCount++;
+                      console.log(`[DEBUG] Counted reply: sentMsg=${sentMsg.id}, originalMsg=${originalMessageId}, diffSeconds=${diffSeconds}`);
                     } else {
-                        console.log(`[DEBUG] Skipped: Negative diffSeconds for sentMsg=${sentMsg.id}, originalMsg=${originalMessage.id}`);
+                      console.log(`[DEBUG] Skipped: Negative diffSeconds for sentMsg=${sentMsg.id}, originalMsg=${originalMessageId}`);
                     }
                   } else {
                     console.log(`[DEBUG] Skipped: original message from self or missing fromEmail for sentMsg=${sentMsg.id}`);
                   }
+                } catch (error) {
+                  console.log(`[DEBUG] Could not fetch original message ${originalMessageId}: ${error instanceof Error ? error.message : String(error)}`);
+                  // Fall back to thread-based approach
+                  const threadRes = await gmail.users.threads.get({
+                    userId: 'me',
+                    id: sentMsg.threadId,
+                    format: 'full' 
+                  });
+
+                  const threadMessages = threadRes.data.messages || [];
+                  console.log(`[DEBUG] Thread ${sentMsg.threadId} has ${threadMessages.length} messages`);
+                  
+                  // Log details of all messages in the thread
+                  threadMessages.forEach((msg, index) => {
+                    const fromHeader = msg.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
+                    const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
+                    const date = msg.internalDate ? new Date(parseInt(msg.internalDate, 10)).toISOString() : 'unknown';
+                    console.log(`[DEBUG] Thread message ${index}: id=${msg.id}, from=${fromEmail}, date=${date}, isCurrentSent=${msg.id === sentMsg.id}`);
+                  });
+                  
+                  const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
+                  if (!currentSentMessage || !currentSentMessage.internalDate) {
+                    console.log(`[DEBUG] Skipping sent message ${sentMsg.id}: cannot find in thread or missing internalDate`);
+                    continue;
+                  }
+
+                  const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
+
+                  const originalMessage = threadMessages
+                    .filter(m => {
+                        if (m.id === sentMsg.id || !m.internalDate) {
+                            return false;
+                        }
+                        return parseInt(m.internalDate, 10) < sentTimestamp;
+                    })
+                    .sort((a, b) => parseInt(b.internalDate!, 10) - parseInt(a.internalDate!, 10))[0];
+
+                  if (originalMessage && originalMessage.internalDate) {
+                      const fromHeader = originalMessage.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
+                      const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
+                      if(fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase()){
+                        const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
+                        const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
+                        if (diffSeconds >= 0) {
+                            totalResponseTime += diffSeconds;
+                            responseCount++;
+                            console.log(`[DEBUG] Counted reply (fallback): sentMsg=${sentMsg.id}, originalMsg=${originalMessage.id}, diffSeconds=${diffSeconds}`);
+                        } else {
+                            console.log(`[DEBUG] Skipped: Negative diffSeconds for sentMsg=${sentMsg.id}, originalMsg=${originalMessage.id}`);
+                        }
+                      } else {
+                        console.log(`[DEBUG] Skipped: original message from self or missing fromEmail for sentMsg=${sentMsg.id}`);
+                      }
+                  } else {
+                    console.log(`[DEBUG] Skipped: No original message found for sentMsg=${sentMsg.id}`);
+                  }
+                }
               } else {
-                console.log(`[DEBUG] Skipped: No original message found for sentMsg=${sentMsg.id}`);
+                console.log(`[DEBUG] Skipped: Could not extract original message ID from In-Reply-To header for sentMsg=${sentMsg.id}`);
               }
           } else {
             console.log(`[DEBUG] Skipped: Not a reply (no In-Reply-To or References) for sentMsg=${sentMsg.id}`);
