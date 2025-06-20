@@ -70,7 +70,6 @@ export async function calculateResponseTime(
           const hasReferences = headers?.some(h => h.name?.toLowerCase() === 'references');
   
           if ((hasInReplyTo || hasReferences) && subject.startsWith('Re:')) {
-              console.log(`[REPLY-DEBUG] Potential reply found - Subject: "${subject}", ID: ${sentMsg.id}`);
               const inReplyToHeader = headers?.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
               let originalMessageId = null;
               
@@ -185,10 +184,17 @@ async function main() {
       console.error('Failed to fetch users:', userError);
       process.exit(1);
     }
-    const today = DateTime.now().toISODate();
+    
     for (const user of users || []) {
       const user_id = user.user_id;
       const tz = user.time_zone || 'UTC';
+      const date = DateTime.now().setZone(tz).toISODate();
+
+      if (!date) {
+        console.error(`Could not determine date for user ${user_id} with timezone ${tz}`);
+        continue;
+      }
+
       try {
         console.log(`Processing user ${user_id} (${tz})...`);
 
@@ -198,13 +204,15 @@ async function main() {
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
         const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz, 'today');
+        
         await supabase.from('response_time_cache').upsert({
           user_id,
-          date: today,
+          date: date,
           average_response_time,
           reply_count: count,
           updated_at: new Date().toISOString(),
-        });
+        }, { onConflict: 'user_id,date' });
+
         console.log(`User ${user_id}: avg=${average_response_time}, count=${count}`);
       } catch (err) {
         console.error(`Error processing user ${user_id}:`, err);
