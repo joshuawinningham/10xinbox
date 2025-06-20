@@ -899,7 +899,7 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
       oauth2Client.setCredentials({ access_token: accessToken });
       const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   
-      const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz, day);
+      const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day);
       
       // Update cache with the date
       if (date) {

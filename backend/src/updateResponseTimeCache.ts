@@ -42,7 +42,7 @@ export async function calculateResponseTime(
     const sentRes = await gmail.users.messages.list({
       userId: 'me',
       q: gmailQuery,
-      maxResults: 100, // Limit to 100 sent messages to avoid huge loops
+      maxResults: 100,
     });
   
     const sentMessages = sentRes.data.messages || [];
@@ -110,21 +110,20 @@ export async function calculateResponseTime(
                         const threadMessages = threadRes.data.messages || [];
                         const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
                         
-                        if (!currentSentMessage || !currentSentMessage.internalDate) {
-                          continue;
-                        }
-                        
-                        const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
-                        const receivedTimestamp = parseInt(originalMsgRes.data.internalDate!, 10);
-                        const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
-                        
-                        if (diffSeconds >= 0) {
-                          totalResponseTime += diffSeconds;
-                          responseCount++;
+                        if (currentSentMessage?.internalDate && originalMsgRes.data.internalDate) {
+                          const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
+                          const receivedTimestamp = parseInt(originalMsgRes.data.internalDate, 10);
+                          const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
+                          
+                          if (diffSeconds >= 0) {
+                            totalResponseTime += diffSeconds;
+                            responseCount++;
+                          }
                         }
                       }
                     }
                   } else {
+                    // Fall back to thread-based approach
                     const threadRes = await gmail.users.threads.get({
                       userId: 'me',
                       id: sentMsg.threadId,
@@ -134,71 +133,29 @@ export async function calculateResponseTime(
                     const threadMessages = threadRes.data.messages || [];
                     
                     const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
-                    if (!currentSentMessage || !currentSentMessage.internalDate) {
-                      continue;
-                    }
+                    if (currentSentMessage?.internalDate) {
+                      const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
 
-                    const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
+                      const originalMessage = threadMessages
+                        .filter(m => m.id !== sentMsg.id && m.internalDate && parseInt(m.internalDate, 10) < sentTimestamp)
+                        .sort((a, b) => parseInt(b.internalDate!, 10) - parseInt(a.internalDate!, 10))[0];
 
-                    const originalMessage = threadMessages
-                      .filter(m => {
-                          if (m.id === sentMsg.id || !m.internalDate) {
-                              return false;
+                      if (originalMessage?.internalDate) {
+                          const fromHeader = originalMessage.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
+                          const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
+                          if(fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase()){
+                            const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
+                            const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
+                            if (diffSeconds >= 0) {
+                                totalResponseTime += diffSeconds;
+                                responseCount++;
+                            }
                           }
-                          return parseInt(m.internalDate, 10) < sentTimestamp;
-                      })
-                      .sort((a, b) => parseInt(b.internalDate!, 10) - parseInt(a.internalDate!, 10))[0];
-
-                    if (originalMessage && originalMessage.internalDate) {
-                        const fromHeader = originalMessage.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
-                        const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
-                        if(fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase()){
-                          const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
-                          const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
-                          if (diffSeconds >= 0) {
-                              totalResponseTime += diffSeconds;
-                              responseCount++;
-                          }
-                        }
+                      }
                     }
                   }
                 } catch (error) {
-                  const threadRes = await gmail.users.threads.get({
-                    userId: 'me',
-                    id: sentMsg.threadId,
-                    format: 'full' 
-                  });
-
-                  const threadMessages = threadRes.data.messages || [];
-                  
-                  const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
-                  if (!currentSentMessage || !currentSentMessage.internalDate) {
-                    continue;
-                  }
-
-                  const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
-
-                  const originalMessage = threadMessages
-                    .filter(m => {
-                        if (m.id === sentMsg.id || !m.internalDate) {
-                            return false;
-                        }
-                        return parseInt(m.internalDate, 10) < sentTimestamp;
-                    })
-                    .sort((a, b) => parseInt(b.internalDate!, 10) - parseInt(a.internalDate!, 10))[0];
-
-                  if (originalMessage && originalMessage.internalDate) {
-                      const fromHeader = originalMessage.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
-                      const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
-                      if(fromEmail && fromEmail.toLowerCase() !== userEmail.toLowerCase()){
-                        const receivedTimestamp = parseInt(originalMessage.internalDate, 10);
-                        const diffSeconds = Math.round((sentTimestamp - receivedTimestamp) / 1000);
-                        if (diffSeconds >= 0) {
-                            totalResponseTime += diffSeconds;
-                            responseCount++;
-                        }
-                      }
-                  }
+                  console.error('Error during direct message search, falling back to thread method:', error);
                 }
               }
           }
