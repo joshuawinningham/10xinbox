@@ -39,73 +39,81 @@ async function getValidAccessToken(user_id: string) {
 
 export async function calculateResponseTime(user_id: string, tz: string) {
   const now = DateTime.now().setZone(tz);
-  const start = now.startOf('day');
-  const end = start.plus({ days: 1 });
-  const dateStr = start.toISODate();
-  const nextDay = end.toISODate();
+  const startOfDay = now.startOf('day');
+  const endOfDay = now.endOf('day');
 
-  // Get sent emails that are replies from the sent_emails table
-  const { data: sentEmails, error: sentEmailsError } = await supabase
-    .from('sent_emails')
-    .select('in_reply_to, sent_at')
-    .eq('user_id', user_id)
-    .eq('is_reply', true)
-    .gte('sent_at', dateStr)
-    .lt('sent_at', nextDay)
-    .not('in_reply_to', 'is', null);
-
-  if (sentEmailsError) {
-    throw new Error(`Failed to fetch sent emails: ${sentEmailsError.message}`);
-  }
-
-  if (!sentEmails || sentEmails.length === 0) {
-    return { average_response_time: null, count: 0 };
-  }
-
-  // Get access token for Gmail API
   const accessToken = await getValidAccessToken(user_id);
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: accessToken });
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
+  // 1. Fetch all emails sent today
+  const sentRes = await gmail.users.messages.list({
+    userId: 'me',
+    q: `from:me after:${startOfDay.toSeconds()} before:${endOfDay.toSeconds()}`,
+  });
+
+  const sentMessages = sentRes.data.messages || [];
+  if (sentMessages.length === 0) {
+    return { average_response_time: null, count: 0 };
+  }
+
   let totalResponseTime = 0;
   let responseCount = 0;
 
-  // For each reply, get the original message it's replying to
-  for (const email of sentEmails) {
+  // 2. For each sent message, check if it's a reply and calculate response time
+  for (const message of sentMessages) {
     try {
-      if (!email.in_reply_to) continue;
+      if (!message.id) continue;
 
-      const originalMsgId = email.in_reply_to.replace(/[<>]/g, '');
+      const msgRes = await gmail.users.messages.get({
+        userId: 'me',
+        id: message.id,
+        format: 'metadata',
+        metadataHeaders: ['In-Reply-To', 'Date'],
+      });
+      
+      const headers = msgRes.data.payload?.headers || [];
+      const inReplyTo = headers.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
+      const sentDateHeader = headers.find(h => h.name?.toLowerCase() === 'date')?.value;
+
+      if (!inReplyTo || !sentDateHeader) {
+        continue; // Not a reply we can process
+      }
+
+      // 3. Fetch the original message
+      const originalMsgId = inReplyTo.replace(/[<>]/g, '');
       const originalMsgRes = await gmail.users.messages.get({
         userId: 'me',
         id: originalMsgId,
         format: 'metadata',
-        metadataHeaders: ['Date']
+        metadataHeaders: ['Date'],
       });
 
-      const originalDate = originalMsgRes.data.payload?.headers?.find(h => h.name === 'Date')?.value;
-      if (!originalDate) continue;
+      const originalDateHeader = originalMsgRes.data.payload?.headers?.find(h => h.name?.toLowerCase() === 'date')?.value;
+      if (!originalDateHeader) continue;
 
-      const receivedTime = new Date(originalDate).getTime();
-      const sentTime = new Date(email.sent_at).getTime();
-      
+      // 4. Calculate the time difference
+      const receivedTime = new Date(originalDateHeader).getTime();
+      const sentTime = new Date(sentDateHeader).getTime();
+
       if (sentTime > receivedTime) {
-        totalResponseTime += sentTime - receivedTime;
+        const diffSeconds = Math.round((sentTime - receivedTime) / 1000);
+        totalResponseTime += diffSeconds;
         responseCount++;
       }
     } catch (error) {
       console.error('Error processing email for response time:', {
-        in_reply_to: email.in_reply_to,
-        error: error instanceof Error ? error.message : String(error)
+        messageId: message.id,
+        error: error instanceof Error ? error.message : String(error),
       });
       continue;
     }
   }
 
   return {
-    average_response_time: responseCount > 0 ? (totalResponseTime / responseCount) / 1000 : null, // Return seconds
-    count: responseCount
+    average_response_time: responseCount > 0 ? Math.round(totalResponseTime / responseCount) : null,
+    count: responseCount,
   };
 }
 
