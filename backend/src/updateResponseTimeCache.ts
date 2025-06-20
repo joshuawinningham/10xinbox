@@ -59,12 +59,14 @@ export async function calculateResponseTime(
               userId: 'me',
               id: sentMsg.id,
               format: 'metadata',
-              metadataHeaders: ['In-Reply-To']
+              metadataHeaders: ['In-Reply-To', 'References']
           });
   
-          const hasInReplyTo = msgRes.data.payload?.headers?.some(h => h.name === 'In-Reply-To');
+          const headers = msgRes.data.payload?.headers;
+          const hasInReplyTo = headers?.some(h => h.name?.toLowerCase() === 'in-reply-to');
+          const hasReferences = headers?.some(h => h.name?.toLowerCase() === 'references');
   
-          if (hasInReplyTo) {
+          if (hasInReplyTo || hasReferences) {
               const threadRes = await gmail.users.threads.get({
                   userId: 'me',
                   id: sentMsg.threadId,
