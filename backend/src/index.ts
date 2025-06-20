@@ -864,23 +864,34 @@ fastify.post('/api/gmail/top-senders', async (request, reply) => {
 
 // Endpoint to get average response time for today (or a given day)
 fastify.post('/api/gmail/response-time', async (request, reply) => {
-    const { user_id, time_zone, day } = request.body as { user_id?: string; time_zone?: string; day?: 'today' | 'yesterday' };
-    if (!user_id || !time_zone) {
-      return reply.status(400).send({ error: 'Missing user_id or time_zone' });
+    const { user_id, time_zone, day = 'today' } = request.body as { user_id?: string, time_zone?: string, day?: 'today' | 'yesterday' };
+    if (!user_id) {
+      return reply.status(400).send({ error: 'Missing user_id' });
     }
-  
     try {
-      const { data: cache, error: cacheError } = await supabase
-        .from('response_time_cache')
-        .select('average_response_time, reply_count, updated_at')
-        .eq('user_id', user_id)
-        .single();
-  
-      if (cache && new Date().getTime() - new Date(cache.updated_at).getTime() < 300000) { // 5-minute cache
-        return reply.send({
-          average_response_time: cache.average_response_time,
-          reply_count: cache.reply_count,
-        });
+      // Use user's timezone to determine the correct date for the cache key
+      let tz = time_zone;
+      if (!tz) {
+        const { data: settingsRow } = await supabase.from('user_settings').select('time_zone').eq('user_id', user_id).single();
+        tz = settingsRow?.time_zone || 'UTC';
+      }
+      const date = DateTime.now().setZone(tz).startOf('day').toISODate();
+
+      // Check for cached value for the correct date
+      if (date) {
+        const { data: cache } = await supabase
+          .from('response_time_cache')
+          .select('average_response_time, reply_count, updated_at')
+          .eq('user_id', user_id)
+          .eq('date', date)
+          .single();
+    
+        if (cache && new Date().getTime() - new Date(cache.updated_at).getTime() < 300000) { // 5-minute cache
+          return reply.send({
+            average_response_time: cache.average_response_time,
+            reply_count: cache.reply_count,
+          });
+        }
       }
   
       const accessToken = await getValidAccessToken(user_id);
@@ -888,15 +899,18 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
       oauth2Client.setCredentials({ access_token: accessToken });
       const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   
-      const { average_response_time, count } = await calculateResponseTime(user_id, gmail, time_zone, day);
+      const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz, day);
       
-      // Update cache
-      await supabase.from('response_time_cache').upsert({
-        user_id,
-        average_response_time,
-        reply_count: count,
-        updated_at: new Date().toISOString()
-      });
+      // Update cache with the date
+      if (date) {
+        await supabase.from('response_time_cache').upsert({
+          user_id,
+          date,
+          average_response_time,
+          reply_count: count,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,date' });
+      }
   
       reply.send({ average_response_time, reply_count: count });
     } catch (error: any) {
