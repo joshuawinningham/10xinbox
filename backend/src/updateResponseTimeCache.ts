@@ -147,7 +147,9 @@ async function main() {
     }
   }
   console.log('Response time cache update job complete.');
-  process.exit(0);
 }
 
-main(); 
+// Only run main() if this file is executed directly
+if (require.main === module) {
+  main();
+} 

@@ -68,6 +68,11 @@ fastify.get('/health', async (request, reply) => {
   return { status: 'ok' };
 });
 
+// Root endpoint for Render health checks
+fastify.get('/', async (request, reply) => {
+  return { status: 'ok', message: 'Email KPI Backend API' };
+});
+
 // Endpoint to start OAuth flow
 fastify.get('/api/auth/google', async (request, reply) => {
   const { user_id } = request.query as { user_id?: string };
@@ -2354,10 +2359,19 @@ fastify.post('/api/test/inbox-zero-buffer', async (request, reply) => {
 
 const start = async () => {
   try {
-    await fastify.listen({ port: Number(process.env.PORT) || 3001, host: '0.0.0.0' });
-    console.log(`Server listening on port ${process.env.PORT || 3001}`);
+    const port = Number(process.env.PORT) || 3001;
+    const host = '0.0.0.0';
+    
+    console.log(`Starting server with configuration:`);
+    console.log(`- PORT environment variable: ${process.env.PORT || 'not set (using default 3001)'}`);
+    console.log(`- Binding to port: ${port}`);
+    console.log(`- Binding to host: ${host}`);
+    
+    await fastify.listen({ port, host });
+    console.log(`Server successfully listening on port ${port}`);
+    console.log(`Server accessible at http://0.0.0.0:${port}`);
   } catch (err) {
-    fastify.log.error(err);
+    fastify.log.error('Failed to start server:', err);
     process.exit(1);
   }
 };
