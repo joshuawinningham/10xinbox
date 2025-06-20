@@ -181,21 +181,10 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     const after = Math.floor(start.toUTC().toSeconds());
     const before = Math.floor(end.toUTC().toSeconds());
 
-    // 5. Count sent emails for the day by fetching all message IDs
-    const sentMessagesList = [];
-    let nextPageToken: string | undefined = undefined;
-    do {
-      const res: any = await gmail.users.messages.list({
-        userId: 'me',
-        q: `after:${after} before:${before} from:me`,
-        pageToken: nextPageToken,
-      });
-      if (res.data.messages) {
-        sentMessagesList.push(...res.data.messages);
-      }
-      nextPageToken = res.data.nextPageToken;
-    } while (nextPageToken);
-    const emails_sent = sentMessagesList.length;
+    // 5. Get detailed sent emails to calculate new threads vs replies
+    const { count: replyCount, totalSent } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day === 'today' ? 'today' : 'yesterday');
+    const replies = replyCount || 0;
+    const newThreads = totalSent - replies;
 
     // 6. Count received emails for the day (Inbox, not sent by me)
     const receivedRes = await gmail.users.messages.list({
@@ -204,13 +193,7 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     });
     const emails_received = receivedRes.data.resultSizeEstimate || 0;
 
-    // 7. Get detailed sent emails to calculate new threads vs replies
-    const { count: replyCount } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day === 'today' ? 'today' : 'yesterday');
-    const replies = replyCount || 0;
-    const totalSent = emails_sent;
-    const newThreads = totalSent - replies;
-
-    // 8. Store stats in Supabase (using local date string)
+    // 7. Store stats in Supabase (using local date string)
     const dateStr = start.toISODate();
     if (dateStr) {
       const { error } = await supabase

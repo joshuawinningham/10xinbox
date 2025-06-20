@@ -47,7 +47,7 @@ export async function calculateResponseTime(
   
     const sentMessages = sentRes.data.messages || [];
     if (sentMessages.length === 0) {
-      return { average_response_time: null, count: 0 };
+      return { average_response_time: null, count: 0, totalSent: 0 };
     }
   
     let totalResponseTime = 0;
@@ -172,6 +172,7 @@ export async function calculateResponseTime(
     return {
       average_response_time: responseCount > 0 ? Math.round(totalResponseTime / responseCount) : null,
       count: responseCount,
+      totalSent: sentMessages.length,
     };
 }
 
