@@ -196,51 +196,28 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     const emails_received = receivedRes.data.resultSizeEstimate || 0;
 
     // 7. Get detailed sent emails to calculate new threads vs replies
-    const sentMessages = sentRes.data.messages || [];
-    let newThreads = 0;
-    let replies = 0;
-    
-    if (sentMessages.length > 0) {
-      // Fetch message details to check if they are replies
-      const messageDetails = await Promise.all(
-        sentMessages.slice(0, 100).map(async (msg) => {
-          const detailRes = await gmail.users.messages.get({ 
-            userId: 'me', 
-            id: msg.id!, 
-            format: 'metadata',
-            metadataHeaders: ['Subject', 'In-Reply-To']
-          });
-          return detailRes.data;
-        })
-      );
-      
-      messageDetails.forEach((msg) => {
-        const subject = msg.payload?.headers?.find(h => h.name === 'Subject')?.value || '';
-        const inReplyTo = msg.payload?.headers?.find(h => h.name === 'In-Reply-To')?.value;
-        
-        if (subject.startsWith('Re:') || inReplyTo) {
-          replies++;
-        } else {
-          newThreads++;
-        }
-      });
-    }
-    
-    const totalSent = newThreads + replies;
+    const { count: replyCount } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day === 'today' ? 'today' : 'yesterday');
+    const replies = replyCount || 0;
+    const totalSent = emails_sent; // Total sent from the initial query
+    const newThreads = totalSent - replies;
 
     // 8. Store stats in Supabase (using local date string)
     const dateStr = start.toISODate();
-    const { error } = await supabase
-      .from('email_stats')
-      .upsert({
-        user_id,
-        date: dateStr,
-        emails_sent: totalSent,
-        emails_received,
-      }, { onConflict: 'user_id,date' });
-    if (error) {
-      return reply.status(500).send({ error: error.message });
+    if (dateStr) {
+      const { error } = await supabase
+        .from('email_stats')
+        .upsert({
+          user_id,
+          date: dateStr,
+          emails_sent: totalSent,
+          emails_received,
+        }, { onConflict: 'user_id,date' });
+      if (error) {
+        // Log the error but don't block the response
+        fastify.log.error('Failed to upsert email_stats:', error);
+      }
     }
+    
     return reply.send({ 
       success: true, 
       total_sent: totalSent,
