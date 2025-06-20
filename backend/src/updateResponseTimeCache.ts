@@ -81,6 +81,15 @@ export async function calculateResponseTime(
   
               const threadMessages = threadRes.data.messages || [];
               console.log(`[DEBUG] Thread ${sentMsg.threadId} has ${threadMessages.length} messages`);
+              
+              // Log details of all messages in the thread
+              threadMessages.forEach((msg, index) => {
+                const fromHeader = msg.payload?.headers?.find(h => h.name?.toLowerCase() === 'from')?.value;
+                const fromEmail = fromHeader ? extractEmail(fromHeader) : null;
+                const date = msg.internalDate ? new Date(parseInt(msg.internalDate, 10)).toISOString() : 'unknown';
+                console.log(`[DEBUG] Thread message ${index}: id=${msg.id}, from=${fromEmail}, date=${date}, isCurrentSent=${msg.id === sentMsg.id}`);
+              });
+              
               const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
               if (!currentSentMessage || !currentSentMessage.internalDate) {
                 console.log(`[DEBUG] Skipping sent message ${sentMsg.id}: cannot find in thread or missing internalDate`);
