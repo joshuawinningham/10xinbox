@@ -17,6 +17,7 @@ import { sendEmail } from './email';
 import fastifyMultipart from '@fastify/multipart';
 import { calculateResponseTime } from './updateResponseTimeCache';
 import { getValidAccessToken } from './utils/gmail';
+import { OAuth2Client } from 'google-auth-library';
 
 dotenv.config({ path: '.env.local' });
 
@@ -894,14 +895,14 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     try {
       const { data: cache, error: cacheError } = await supabase
         .from('response_time_cache')
-        .select('average_response_time, count, updated_at')
+        .select('average_response_time, reply_count, updated_at')
         .eq('user_id', user_id)
         .single();
   
       if (cache && new Date().getTime() - new Date(cache.updated_at).getTime() < 300000) { // 5-minute cache
         return reply.send({
           average_response_time: cache.average_response_time,
-          count: cache.count,
+          reply_count: cache.reply_count,
         });
       }
   
@@ -916,11 +917,11 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
       await supabase.from('response_time_cache').upsert({
         user_id,
         average_response_time,
-        count,
+        reply_count: count,
         updated_at: new Date().toISOString()
       });
   
-      reply.send({ average_response_time, count });
+      reply.send({ average_response_time, reply_count: count });
     } catch (error: any) {
       if (error.message.includes('Token has been expired or revoked') || error.message.includes('No tokens found for user')) {
         return reply.status(401).send({ error: 'insufficient_permissions' });
@@ -1023,7 +1024,6 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
       } else {
         // Fetch from Gmail API with buffer consideration
         const startOfDay = day.startOf('day');
-        const endOfDay = day.endOf('day');
         
         // Calculate the buffer cutoff time for this day
         const bufferMinutes = workingHours?.inbox_zero_buffer_minutes || 30;
@@ -1035,11 +1035,26 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
         const queryEndTime = bufferCutoff;
         
         const before = Math.floor(queryEndTime.toUTC().toSeconds());
-        const res = await gmail.users.messages.list({
-          userId: 'me',
-          q: `label:INBOX after:${Math.floor(startOfDay.toUTC().toSeconds())} before:${before}`,
-        });
-        const inboxCount = res.data.resultSizeEstimate || 0;
+        
+        // Use accurate counting instead of resultSizeEstimate
+        let inboxCount = 0;
+        let nextPageToken: string | undefined = undefined;
+        
+        do {
+          const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+            userId: 'me',
+            q: `label:INBOX after:${Math.floor(startOfDay.toUTC().toSeconds())} before:${before}`,
+            maxResults: 500,
+            pageToken: nextPageToken
+          });
+          
+          if (res.data.messages) {
+            inboxCount += res.data.messages.length;
+          }
+          
+          nextPageToken = res.data.nextPageToken ?? undefined;
+        } while (nextPageToken);
+        
         results.push({ 
           date: dateStr, 
           inboxCount,

@@ -43,7 +43,7 @@ export default function Dashboard() {
       .then(res => res.json())
       .then(data => {
         setResponseTime(data.average_response_time);
-        setResponseCount(data.count || 0);
+        setResponseCount(data.reply_count || 0);
         setResponseError(null);
       })
       .catch(err => {
@@ -79,7 +79,7 @@ export default function Dashboard() {
             const data = await res.json();
             console.log('Response time data received:', data);
             setResponseTime(data.average_response_time);
-            setResponseCount(data.count || 0);
+            setResponseCount(data.reply_count || 0);
           } catch (err) {
             console.error('Error fetching response time:', err);
             setResponseError((err as Error).message);

@@ -9,7 +9,8 @@
     "start": "node dist/src/index.js",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
     "preview-emails": "ts-node src/preview-emails.ts",
-    "update-inbox-zero": "ts-node src/updateInboxZero.ts"
+    "update-inbox-zero": "ts-node src/updateInboxZero.ts",
+    "debug-metrics": "ts-node src/debug-metrics.ts"
   },
   "keywords": [],
   "author": "",

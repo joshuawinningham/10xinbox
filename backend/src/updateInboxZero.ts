@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-import { google } from 'googleapis';
+import { google, gmail_v1 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { DateTime } from 'luxon';
 import logger from './utils/logger';
+import { GaxiosResponse } from 'gaxios';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -113,14 +114,23 @@ async function updateInboxZeroData() {
         }
 
         // Fetch messages up to the calculated end time
-        const response = await gmail.users.messages.list({
-          userId: 'me',
-          q: `after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(queryEndTime.toSeconds())}`,
-          maxResults: 500
-        });
-
-        const messages = response.data.messages || [];
-        const inboxCount = messages.length;
+        let inboxCount = 0;
+        let nextPageToken: string | undefined = undefined;
+        
+        do {
+          const response: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+            userId: 'me',
+            q: `label:INBOX after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(queryEndTime.toSeconds())}`,
+            maxResults: 500,
+            pageToken: nextPageToken
+          });
+          
+          if (response.data.messages) {
+            inboxCount += response.data.messages.length;
+          }
+          
+          nextPageToken = response.data.nextPageToken ?? undefined;
+        } while (nextPageToken);
 
         // Insert or update inbox zero data for today
         const { error: upsertError } = await supabase
