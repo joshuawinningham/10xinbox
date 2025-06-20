@@ -16,6 +16,7 @@ import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { sendEmail } from './email';
 import fastifyMultipart from '@fastify/multipart';
 import { calculateResponseTime } from './updateResponseTimeCache';
+import { getValidAccessToken } from './utils/gmail';
 
 dotenv.config({ path: '.env.local' });
 
@@ -125,47 +126,6 @@ fastify.get('/api/auth/google/callback', async (request, reply) => {
     return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
   }
 });
-
-// Utility to get a valid Gmail access token for a user (refresh if needed)
-async function getValidAccessToken(user_id: string) {
-  // 1. Get tokens from Supabase
-  const { data, error } = await supabase
-    .from('gmail_tokens')
-    .select('*')
-    .eq('user_id', user_id)
-    .single();
-
-  if (error || !data) throw new Error('No tokens found for user');
-
-  const { access_token, refresh_token, expires_at } = data;
-
-  // 2. Check if access_token is expired
-  if (new Date(expires_at) > new Date()) {
-    // Not expired, return it
-    return access_token;
-  }
-
-  // 3. Refresh the token using getAccessToken and credentials.expiry_date
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${BASE_URL}/api/auth/google/callback`
-  );
-  oauth2Client.setCredentials({ refresh_token });
-
-  const { token: newAccessToken } = await oauth2Client.getAccessToken();
-  const newExpiry = oauth2Client.credentials.expiry_date;
-
-  await supabase
-    .from('gmail_tokens')
-    .update({
-      access_token: newAccessToken,
-      expires_at: new Date(newExpiry!).toISOString(),
-    })
-    .eq('user_id', user_id);
-
-  return newAccessToken;
-}
 
 // Test endpoint to get a valid Gmail access token for a user
 fastify.get('/api/gmail/test-token', async (request, reply) => {
@@ -823,197 +783,152 @@ fastify.post('/api/gmail/disconnect', async (request, reply) => {
 
 // Endpoint to get top senders for a user in a date range
 fastify.post('/api/gmail/top-senders', async (request, reply) => {
-  const { user_id, time_zone, start_date, end_date, limit } = request.body as {
-    user_id?: string;
-    time_zone?: string;
-    start_date?: string;
-    end_date?: string;
-    limit?: number;
-  };
-  if (!user_id) {
-    return reply.status(400).send({ error: 'Missing user_id' });
-  }
-  try {
-    // 1. Get a valid access token
-    const accessToken = await getValidAccessToken(user_id);
-    // 2. Set up Gmail API client
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    // 3. Get user's time zone from param or user_settings
-    let tz = time_zone;
-    if (!tz) {
-      const { data: settingsRow } = await supabase
-        .from('user_settings')
-        .select('time_zone')
-        .eq('user_id', user_id)
-        .single();
-      tz = settingsRow?.time_zone || 'UTC';
+    const { user_id, time_zone, start_date, end_date, limit } = request.body as {
+        user_id?: string;
+        time_zone?: string;
+        start_date?: string;
+        end_date?: string;
+        limit?: number;
+    };
+    if (!user_id) {
+        return reply.status(400).send({ error: 'Missing user_id' });
     }
-    // 4. Get date range
-    let start, end;
-    if (start_date && end_date) {
-      start = DateTime.fromISO(start_date, { zone: tz }).startOf('day');
-      end = DateTime.fromISO(end_date, { zone: tz }).endOf('day');
-    } else {
-      // Default: last 30 days
-      end = DateTime.now().setZone(tz).endOf('day');
-      start = end.minus({ days: 29 }).startOf('day');
-    }
-    const after = Math.floor(start.toUTC().toSeconds());
-    const before = Math.floor(end.toUTC().toSeconds());
-    // 5. Fetch all received messages in the date range (INBOX, not from me)
-    async function fetchAllMessages(q: string) {
-      let messages: any[] = [];
-      let nextPageToken: string | undefined = undefined;
-      do {
-        const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
-          userId: 'me',
-          q,
-          pageToken: nextPageToken,
-          maxResults: 500,
-        });
-        if (res.data.messages) messages = messages.concat(res.data.messages);
-        nextPageToken = res.data.nextPageToken ?? undefined;
-      } while (nextPageToken);
-      return messages;
-    }
-    const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
-    // 6. Fetch sender info for each message (batch, limit concurrency)
-    const senderCounts: Record<string, { name: string; count: number }> = {};
-    const batchSize = 20;
-    for (let i = 0; i < receivedMessages.length; i += batchSize) {
-      const batch = receivedMessages.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map(async (msg) => {
-          const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-          const headers = res.data.payload?.headers || [];
-          const fromHeader = headers.find((h) => h.name?.toLowerCase() === 'from');
-          if (fromHeader && fromHeader.value) {
-            // Parse name and email from the From header
-            const match = fromHeader.value.match(/^(.*?)(?:\s*<(.+?)>)?$/);
-            let name = '', email = '';
-            if (match) {
-              name = match[1]?.replace(/"/g, '').trim();
-              email = match[2] || match[1];
-              if (!email.includes('@')) email = '';
-            }
-            if (email) {
-              if (!senderCounts[email]) senderCounts[email] = { name, count: 0 };
-              senderCounts[email].count++;
-              if (name && !senderCounts[email].name) senderCounts[email].name = name;
-            }
+    try {
+        const accessToken = await getValidAccessToken(user_id);
+        const oauth2Client = new google.auth.OAuth2();
+        oauth2Client.setCredentials({ access_token: accessToken });
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        // 3. Get user's time zone from param or user_settings
+        let tz = time_zone;
+        if (!tz) {
+          const { data: settingsRow } = await supabase
+            .from('user_settings')
+            .select('time_zone')
+            .eq('user_id', user_id)
+            .single();
+          tz = settingsRow?.time_zone || 'UTC';
+        }
+        // 4. Get date range
+        let start, end;
+        if (start_date && end_date) {
+          start = DateTime.fromISO(start_date, { zone: tz }).startOf('day');
+          end = DateTime.fromISO(end_date, { zone: tz }).endOf('day');
+        } else {
+          // Default: last 30 days
+          end = DateTime.now().setZone(tz).endOf('day');
+          start = end.minus({ days: 29 }).startOf('day');
+        }
+        const after = Math.floor(start.toUTC().toSeconds());
+        const before = Math.floor(end.toUTC().toSeconds());
+        // 5. Fetch all received messages in the date range (INBOX, not from me)
+        async function fetchAllMessages(q: string) {
+          let messages: any[] = [];
+          let nextPageToken: string | undefined = undefined;
+          do {
+            const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
+              userId: 'me',
+              q,
+              pageToken: nextPageToken,
+              maxResults: 500,
+            });
+            if (res.data.messages) messages = messages.concat(res.data.messages);
+            nextPageToken = res.data.nextPageToken ?? undefined;
+          } while (nextPageToken);
+          return messages;
+        }
+        const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
+        // 6. Fetch sender info for each message (batch, limit concurrency)
+        const senderCounts: Record<string, { name: string; count: number }> = {};
+        const batchSize = 20;
+        for (let i = 0; i < receivedMessages.length; i += batchSize) {
+          const batch = receivedMessages.slice(i, i + batchSize);
+          const batchResults = await Promise.all(
+            batch.map(async (msg) => {
+              const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
+              const headers = res.data.payload?.headers || [];
+              const fromHeader = headers.find((h) => h.name?.toLowerCase() === 'from');
+              if (fromHeader && fromHeader.value) {
+                // Parse name and email from the From header
+                const match = fromHeader.value.match(/^(.*?)(?:\s*<(.+?)>)?$/);
+                let name = '', email = '';
+                if (match) {
+                  name = match[1]?.replace(/"/g, '').trim();
+                  email = match[2] || match[1];
+                  if (!email.includes('@')) email = '';
+                }
+                if (email) {
+                  if (!senderCounts[email]) senderCounts[email] = { name, count: 0 };
+                  senderCounts[email].count++;
+                  if (name && !senderCounts[email].name) senderCounts[email].name = name;
+                }
+              }
+            })
+          );
+        }
+        // 7. Sort and return top N senders
+        const top = Object.entries(senderCounts)
+          .map(([email, { name, count }]) => ({ email, name, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, limit || 10);
+        return reply.send(top);
+    } catch (err: any) {
+        fastify.log.error(err);
+        // Check for insufficient permissions error from Google
+        if (err && err.errors && Array.isArray(err.errors)) {
+          const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
+          if (insufficient) {
+            return reply.status(403).send({ error: 'insufficient_permissions' });
           }
-        })
-      );
+        }
+        return reply.status(500).send({ error: err.message || 'Failed to fetch top senders' });
     }
-    // 7. Sort and return top N senders
-    const top = Object.entries(senderCounts)
-      .map(([email, { name, count }]) => ({ email, name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, limit || 10);
-    return reply.send(top);
-  } catch (err: any) {
-    fastify.log.error(err);
-    // Check for insufficient permissions error from Google
-    if (err && err.errors && Array.isArray(err.errors)) {
-      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
-      if (insufficient) {
-        return reply.status(403).send({ error: 'insufficient_permissions' });
-      }
-    }
-    return reply.status(500).send({ error: err.message || 'Failed to fetch top senders' });
-  }
 });
 
 // Endpoint to get average response time for today (or a given day)
 fastify.post('/api/gmail/response-time', async (request, reply) => {
-  const { user_id, time_zone, day, retry_count = 0 } = request.body as { user_id?: string, time_zone?: string, day?: string, retry_count?: number };
-  if (!user_id) {
-    return reply.status(400).send({ error: 'Missing user_id' });
-  }
-
-  // Limit retries to prevent infinite loops
-  if (retry_count > 3) {
-    return reply.status(500).send({ error: 'Max retries exceeded for response time calculation' });
-  }
-
-  try {
-    // 1. Get user's time zone from param or user_settings
-    let tz = time_zone;
-    if (!tz) {
-      const { data: settingsRow } = await supabase
-        .from('user_settings')
-        .select('time_zone')
+    const { user_id, time_zone, day } = request.body as { user_id?: string; time_zone?: string; day?: 'today' | 'yesterday' };
+    if (!user_id || !time_zone) {
+      return reply.status(400).send({ error: 'Missing user_id or time_zone' });
+    }
+  
+    try {
+      const { data: cache, error: cacheError } = await supabase
+        .from('response_time_cache')
+        .select('average_response_time, count, updated_at')
         .eq('user_id', user_id)
         .single();
-      tz = settingsRow?.time_zone || 'UTC';
-    }
-    // 2. Get today's date in user's time zone
-    const now = DateTime.now().setZone(tz);
-    let start;
-    if (day === 'today' || !day) {
-      start = now.startOf('day');
-    } else {
-      start = now.minus({ days: 1 }).startOf('day');
-    }
-    const dateStr = start.toISODate();
-    // 3. Try to fetch from cache
-    const { data: cacheRow, error: cacheError } = await supabase
-      .from('response_time_cache')
-      .select('average_response_time, reply_count, updated_at')
-      .eq('user_id', user_id)
-      .eq('date', dateStr)
-      .single();
-    if (cacheRow && cacheRow.average_response_time !== undefined) {
-      return reply.send({
-        average_response_time: cacheRow.average_response_time,
-        count: cacheRow.reply_count,
-        cached: true,
-        updated_at: cacheRow.updated_at
-      });
-    }
-    // 4. If not found in cache, fall back to live calculation
-    try {
-      const { average_response_time, count } = await calculateResponseTime(user_id, tz || 'UTC');
-      return reply.send({
+  
+      if (cache && new Date().getTime() - new Date(cache.updated_at).getTime() < 300000) { // 5-minute cache
+        return reply.send({
+          average_response_time: cache.average_response_time,
+          count: cache.count,
+        });
+      }
+  
+      const accessToken = await getValidAccessToken(user_id);
+      const oauth2Client = new google.auth.OAuth2();
+      oauth2Client.setCredentials({ access_token: accessToken });
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+  
+      const { average_response_time, count } = await calculateResponseTime(user_id, gmail, time_zone, day);
+      
+      // Update cache
+      await supabase.from('response_time_cache').upsert({
+        user_id,
         average_response_time,
         count,
-        cached: false,
-        updated_at: null
+        updated_at: new Date().toISOString()
       });
-    } catch (liveErr) {
-      fastify.log.error('Live response time calculation failed', {
-        error: liveErr instanceof Error ? liveErr.message : String(liveErr),
-        userId: user_id,
-        retryCount: retry_count
-      });
-      // If live calculation fails, fall through to default response
-    }
-    // 5. Always send a default response if all else fails
-    return reply.send({
-      average_response_time: null,
-      count: 0,
-      cached: false,
-      updated_at: null
-    });
-  } catch (err: any) {
-    fastify.log.error('Response time calculation failed', {
-      error: err.message,
-      userId: user_id,
-      stack: err.stack,
-      retryCount: retry_count
-    });
-    // Check for insufficient permissions error from Google
-    if (err && err.errors && Array.isArray(err.errors)) {
-      const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
-      if (insufficient) {
-        return reply.status(403).send({ error: 'insufficient_permissions' });
+  
+      reply.send({ average_response_time, count });
+    } catch (error: any) {
+      if (error.message.includes('Token has been expired or revoked') || error.message.includes('No tokens found for user')) {
+        return reply.status(401).send({ error: 'insufficient_permissions' });
       }
+      fastify.log.error(error);
+      reply.status(500).send({ error: error.message || 'Failed to calculate response time' });
     }
-    return reply.status(500).send({ error: err.message || 'Failed to calculate response time' });
-  }
-});
+  });
 
 // Endpoint to get inbox count at the end of each day for the last N days
 fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
