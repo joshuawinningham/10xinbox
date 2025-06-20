@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { sendEmail } from './email';
 import fastifyMultipart from '@fastify/multipart';
+import { calculateResponseTime } from './updateResponseTimeCache';
 
 dotenv.config({ path: '.env.local' });
 
@@ -228,20 +229,59 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     });
     const emails_received = receivedRes.data.resultSizeEstimate || 0;
 
-    // 7. Store stats in Supabase (using local date string)
+    // 7. Get detailed sent emails to calculate new threads vs replies
+    const sentMessages = sentRes.data.messages || [];
+    let newThreads = 0;
+    let replies = 0;
+    
+    if (sentMessages.length > 0) {
+      // Fetch message details to check if they are replies
+      const messageDetails = await Promise.all(
+        sentMessages.slice(0, 100).map(async (msg) => {
+          const detailRes = await gmail.users.messages.get({ 
+            userId: 'me', 
+            id: msg.id!, 
+            format: 'metadata',
+            metadataHeaders: ['Subject', 'In-Reply-To']
+          });
+          return detailRes.data;
+        })
+      );
+      
+      messageDetails.forEach((msg) => {
+        const subject = msg.payload?.headers?.find(h => h.name === 'Subject')?.value || '';
+        const inReplyTo = msg.payload?.headers?.find(h => h.name === 'In-Reply-To')?.value;
+        
+        if (subject.startsWith('Re:') || inReplyTo) {
+          replies++;
+        } else {
+          newThreads++;
+        }
+      });
+    }
+    
+    const totalSent = newThreads + replies;
+
+    // 8. Store stats in Supabase (using local date string)
     const dateStr = start.toISODate();
     const { error } = await supabase
       .from('email_stats')
       .upsert({
         user_id,
         date: dateStr,
-        emails_sent,
+        emails_sent: totalSent,
         emails_received,
       }, { onConflict: 'user_id,date' });
     if (error) {
       return reply.status(500).send({ error: error.message });
     }
-    return reply.send({ success: true, emails_sent, emails_received });
+    return reply.send({ 
+      success: true, 
+      total_sent: totalSent,
+      new_threads: newThreads,
+      replies: replies,
+      emails_received 
+    });
   } catch (err: any) {
     fastify.log.error(err);
     // Check for insufficient permissions error from Google
@@ -472,11 +512,16 @@ fastify.post('/api/report/send', async (request, reply) => {
     const nextDay = DateTime.fromISO(safeDateStr).plus({ days: 1 }).toISODate() || safeDateStr;
     const { data: sentEmails, error: sentEmailsError } = await supabase
       .from('sent_emails')
-      .select('email_id, to_name, to_email, subject, sent_at')
+      .select('email_id, to_name, to_email, subject, sent_at, is_reply')
       .eq('user_id', user_id)
       .gte('sent_at', dateStr)
       .lt('sent_at', nextDay);
     if (sentEmailsError) throw sentEmailsError;
+
+    // Calculate email stats
+    const newThreads = sentEmails.filter(email => !email.is_reply).length;
+    const replies = sentEmails.filter(email => email.is_reply).length;
+    const totalSent = newThreads + replies;
 
     // For each sent email, count the number of open events
     const sentEmailsWithViews = await Promise.all(
@@ -491,6 +536,7 @@ fastify.post('/api/report/send', async (request, reply) => {
           email: email.to_email || '',
           subject: email.subject || '',
           views: opens ? opens.length : 0,
+          isReply: email.is_reply
         };
       })
     );
@@ -506,7 +552,9 @@ fastify.post('/api/report/send', async (request, reply) => {
       subject: `Your Real-Time Email KPI Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
       react: RealTimeReportEmail({
         date: dateStr || '',
-        emailsSent: stats.emails_sent,
+        newThreads,
+        replies,
+        totalSent,
         emailsReceived: stats.emails_received,
         avgResponseTime,
         inboxZeroWorkingDays,
@@ -920,8 +968,30 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
         updated_at: cacheRow.updated_at
       });
     }
-    // 4. If not found in cache, fall back to live calculation (existing logic)
-    // ... existing code ...
+    // 4. If not found in cache, fall back to live calculation
+    try {
+      const { average_response_time, count } = await calculateResponseTime(user_id, tz || 'UTC');
+      return reply.send({
+        average_response_time,
+        count,
+        cached: false,
+        updated_at: null
+      });
+    } catch (liveErr) {
+      fastify.log.error('Live response time calculation failed', {
+        error: liveErr instanceof Error ? liveErr.message : String(liveErr),
+        userId: user_id,
+        retryCount: retry_count
+      });
+      // If live calculation fails, fall through to default response
+    }
+    // 5. Always send a default response if all else fails
+    return reply.send({
+      average_response_time: null,
+      count: 0,
+      cached: false,
+      updated_at: null
+    });
   } catch (err: any) {
     fastify.log.error('Response time calculation failed', {
       error: err.message,
@@ -953,7 +1023,7 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
     if (!tz) {
       const { data: settingsRow } = await supabase
         .from('user_settings')
-        .select('time_zone, working_hours_start, working_hours_end, working_days')
+        .select('time_zone, working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes')
         .eq('user_id', user_id)
         .single();
       tz = settingsRow?.time_zone || 'UTC';
@@ -962,7 +1032,7 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
       // Still get working hours even if timezone is provided
       const { data: settingsRow } = await supabase
         .from('user_settings')
-        .select('working_hours_start, working_hours_end, working_days')
+        .select('working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes')
         .eq('user_id', user_id)
         .single();
       workingHours = settingsRow;
@@ -1031,12 +1101,23 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
           });
         }
       } else {
-        // Fetch from Gmail API
+        // Fetch from Gmail API with buffer consideration
+        const startOfDay = day.startOf('day');
         const endOfDay = day.endOf('day');
-        const before = Math.floor(endOfDay.toUTC().toSeconds());
+        
+        // Calculate the buffer cutoff time for this day
+        const bufferMinutes = workingHours?.inbox_zero_buffer_minutes || 30;
+        const workingHoursEnd = workingHours?.working_hours_end || '17:00:00';
+        const [endHour, endMinute] = workingHoursEnd.split(':').map(Number);
+        const bufferCutoff = day.set({ hour: endHour, minute: endMinute }).minus({ minutes: bufferMinutes });
+        
+        // Use buffer cutoff as the end time for counting emails
+        const queryEndTime = bufferCutoff;
+        
+        const before = Math.floor(queryEndTime.toUTC().toSeconds());
         const res = await gmail.users.messages.list({
           userId: 'me',
-          q: `label:INBOX before:${before}`,
+          q: `label:INBOX after:${Math.floor(startOfDay.toUTC().toSeconds())} before:${before}`,
         });
         const inboxCount = res.data.resultSizeEstimate || 0;
         results.push({ 
@@ -1508,17 +1589,21 @@ fastify.post('/api/gmail/send', async (request, reply) => {
     }
 
     // 8. Send the email
-    await gmail.users.messages.send({
+    const sendResponse = await gmail.users.messages.send({
       userId: 'me',
       requestBody: {
         raw: encodedMessage,
       },
     });
 
+    // Get the Gmail message ID from the response
+    const gmailMessageId = sendResponse.data.id;
+
     // Log successful email send for debugging
     fastify.log.info('Email sent successfully', {
       userId: user_id,
       emailId: email_id,
+      gmailMessageId,
       to: to,
       subject: subject,
       timestamp: new Date().toISOString(),
@@ -1556,6 +1641,8 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       subject,
       sent_at: new Date().toISOString(),
       body,
+      is_reply: subject.startsWith('Re:') || !!inReplyTo, // Set is_reply based on subject prefix or inReplyTo header
+      gmail_message_id: gmailMessageId
     });
     console.log('SENT_EMAILS INSERT:', { sentEmailData, sentEmailError });
 
@@ -1934,24 +2021,26 @@ fastify.post('/api/auth/get-theme', async (request, reply) => {
 
 // Endpoint to set the user's working hours
 fastify.post('/api/auth/set-working-hours', async (request, reply) => {
-  const { user_id, working_hours_start, working_hours_end, working_days } = request.body as { 
+  const { user_id, working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes } = request.body as { 
     user_id?: string; 
     working_hours_start?: string; 
     working_hours_end?: string; 
-    working_days?: number[] 
+    working_days?: number[];
+    inbox_zero_buffer_minutes?: number;
   };
   if (!user_id || !working_hours_start || !working_hours_end || !working_days) {
     fastify.log.error('Missing required fields in request:', { user_id, working_hours_start, working_hours_end, working_days });
     return reply.status(400).send({ error: 'Missing required fields' });
   }
-  fastify.log.info('Setting working hours:', { user_id, working_hours_start, working_hours_end, working_days });
+  fastify.log.info('Setting working hours:', { user_id, working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes });
   const { error } = await supabase
     .from('user_settings')
     .upsert({ 
       user_id, 
       working_hours_start, 
       working_hours_end, 
-      working_days 
+      working_days,
+      inbox_zero_buffer_minutes: inbox_zero_buffer_minutes || 30
     }, { onConflict: 'user_id' });
   if (error) {
     fastify.log.error('Failed to set working hours:', error);
@@ -1969,7 +2058,7 @@ fastify.post('/api/auth/get-working-hours', async (request, reply) => {
   }
   const { data, error } = await supabase
     .from('user_settings')
-    .select('working_hours_start, working_hours_end, working_days')
+    .select('working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes')
     .eq('user_id', user_id)
     .single();
   if (error) {
@@ -1978,7 +2067,8 @@ fastify.post('/api/auth/get-working-hours', async (request, reply) => {
   return reply.send({ 
     working_hours_start: data?.working_hours_start || '09:00:00',
     working_hours_end: data?.working_hours_end || '17:00:00',
-    working_days: data?.working_days || [1, 2, 3, 4, 5]
+    working_days: data?.working_days || [1, 2, 3, 4, 5],
+    inbox_zero_buffer_minutes: data?.inbox_zero_buffer_minutes || 30
   });
 });
 
@@ -2205,6 +2295,60 @@ fastify.post('/api/gmail/debug-response-time', async (request, reply) => {
       stack: err.stack
     });
     return reply.status(500).send({ error: err.message || 'Failed to debug response time calculation' });
+  }
+});
+
+// Test endpoint for inbox zero buffer
+fastify.post('/api/test/inbox-zero-buffer', async (request, reply) => {
+  const { user_id, test_time } = request.body as { user_id?: string, test_time?: string };
+  if (!user_id || !test_time) {
+    return reply.status(400).send({ error: 'Missing user_id or test_time' });
+  }
+
+  try {
+    // Get user's settings
+    const { data: settingsData, error: settingsError } = await supabase
+      .from('user_settings')
+      .select('working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes, time_zone')
+      .eq('user_id', user_id)
+      .single();
+
+    if (settingsError) {
+      throw settingsError;
+    }
+
+    // Parse the test time
+    const tz = settingsData?.time_zone || 'UTC';
+    const testDateTime = DateTime.fromISO(test_time, { zone: tz });
+    
+    // Calculate buffer cutoff time
+    const [endHour, endMinute] = (settingsData?.working_hours_end || '17:00').split(':').map(Number);
+    const bufferMinutes = settingsData?.inbox_zero_buffer_minutes || 30;
+    const workingDayEnd = testDateTime.set({ hour: endHour, minute: endMinute });
+    const bufferCutoff = workingDayEnd.minus({ minutes: bufferMinutes });
+
+    // Check if it's a working day
+    const isWorkingDay = settingsData?.working_days?.includes(testDateTime.weekday) ?? true;
+
+    // Determine if emails at this time would count
+    const emailsCount = testDateTime < bufferCutoff;
+
+    return reply.send({
+      test_time: test_time,
+      working_day: isWorkingDay,
+      buffer_cutoff: bufferCutoff.toISO(),
+      working_day_end: workingDayEnd.toISO(),
+      emails_count: emailsCount,
+      settings: {
+        working_hours_end: settingsData?.working_hours_end,
+        buffer_minutes: bufferMinutes,
+        timezone: tz
+      }
+    });
+
+  } catch (error) {
+    fastify.log.error('Test endpoint error:', error);
+    return reply.status(500).send({ error: 'Failed to run test' });
   }
 });
 

@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { useWorkingHours, WorkingHours } from '@/hooks/useWorkingHours';
 
 const dayLabels = [
@@ -20,6 +21,23 @@ const dayLabels = [
   { value: 6, label: 'Saturday' },
   { value: 7, label: 'Sunday' },
 ];
+
+// Helper function to format time in 12-hour format
+function formatTime(time: string): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hour12 = hours % 12 || 12;
+  return `${hour12}:${minutes.toString().padStart(2, '0')} ${period}`;
+}
+
+// Helper function to calculate buffer cutoff time
+function calculateCutoffTime(endTime: string, bufferMinutes: number): string {
+  const [hours, minutes] = endTime.split(':').map(Number);
+  const totalMinutes = hours * 60 + minutes - bufferMinutes;
+  const cutoffHours = Math.floor(totalMinutes / 60);
+  const cutoffMinutes = totalMinutes % 60;
+  return `${cutoffHours.toString().padStart(2, '0')}:${cutoffMinutes.toString().padStart(2, '0')}`;
+}
 
 export function WorkingHoursSettings() {
   const { workingHours, loading, error, updateWorkingHours } = useWorkingHours();
@@ -60,9 +78,13 @@ export function WorkingHoursSettings() {
     return (
       localWorkingHours.start !== workingHours.start ||
       localWorkingHours.end !== workingHours.end ||
+      localWorkingHours.bufferMinutes !== workingHours.bufferMinutes ||
       JSON.stringify(localWorkingHours.days.sort()) !== JSON.stringify(workingHours.days.sort())
     );
   };
+
+  // Calculate the cutoff time for the help text
+  const cutoffTime = calculateCutoffTime(localWorkingHours.end, localWorkingHours.bufferMinutes);
 
   return (
     <Card>
@@ -100,6 +122,30 @@ export function WorkingHoursSettings() {
               />
             </div>
           </div>
+        </div>
+
+        {/* Buffer Setting */}
+        <div className="space-y-4">
+          <Label className="text-base font-medium">Inbox Zero Buffer</Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="buffer-minutes">Buffer time (minutes):</Label>
+            <Input
+              id="buffer-minutes"
+              type="number"
+              min="0"
+              max="120"
+              value={localWorkingHours.bufferMinutes}
+              onChange={(e) => setLocalWorkingHours(prev => ({ 
+                ...prev, 
+                bufferMinutes: Math.max(0, Math.min(120, parseInt(e.target.value) || 0))
+              }))}
+              className="w-20"
+              disabled={loading || saving}
+            />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Emails received after {formatTime(cutoffTime)} won't count toward Inbox Zero. You have until {formatTime(localWorkingHours.end)} to clear your inbox.
+          </p>
         </div>
 
         {/* Working Days */}

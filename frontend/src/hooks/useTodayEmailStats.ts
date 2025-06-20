@@ -9,6 +9,8 @@ export function useTodayEmailStats() {
   const [emailsReceived, setEmailsReceived] = useState<number | null>(null);
   const [emailsSentYesterday, setEmailsSentYesterday] = useState<number | null>(null);
   const [emailsReceivedYesterday, setEmailsReceivedYesterday] = useState<number | null>(null);
+  const [newThreads, setNewThreads] = useState<number>(0);
+  const [replies, setReplies] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,10 +35,12 @@ export function useTodayEmailStats() {
         .then(res => res.json()),
     ])
       .then(([today, yesterday]) => {
-        setEmailsSent(today.emails_sent ?? 0);
+        setEmailsSent(today.total_sent ?? 0);
         setEmailsReceived(today.emails_received ?? 0);
-        setEmailsSentYesterday(yesterday.emails_sent ?? 0);
+        setEmailsSentYesterday(yesterday.total_sent ?? 0);
         setEmailsReceivedYesterday(yesterday.emails_received ?? 0);
+        setNewThreads(today.new_threads ?? 0);
+        setReplies(today.replies ?? 0);
         setLoading(false);
       })
       .catch(() => {
@@ -50,7 +54,9 @@ export function useTodayEmailStats() {
     emailsReceived,
     emailsSentYesterday,
     emailsReceivedYesterday,
-    loading: loading || tzLoading,
-    error
+    newThreads,
+    replies,
+    loading,
+    error,
   };
 } 

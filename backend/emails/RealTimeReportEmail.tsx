@@ -33,7 +33,9 @@ function formatDate(dateStr: string) {
 
 export type RealTimeReportEmailProps = {
   date: string;
-  emailsSent: number;
+  newThreads: number;
+  replies: number;
+  totalSent: number;
   emailsReceived: number;
   avgResponseTime: string | number;
   inboxZeroWorkingDays: number;
@@ -53,14 +55,16 @@ export type RealTimeReportEmailProps = {
   averageThreadLength?: number;
   longestThread?: number;
   currentInboxCount?: number;
-  sentEmailsWithViews?: Array<{ name: string; email: string; subject: string; views: number }>;
+  sentEmailsWithViews?: Array<{ name: string; email: string; subject: string; views: number; isReply: boolean }>;
 };
 
 const baseUrl = "https://email-kpi.vercel.app";
 
 export default function RealTimeReportEmail({
   date,
-  emailsSent,
+  newThreads,
+  replies,
+  totalSent,
   emailsReceived,
   avgResponseTime,
   inboxZeroWorkingDays,
@@ -109,8 +113,9 @@ export default function RealTimeReportEmail({
               </Column>
               <Column style={{ padding: "0 8px" }}>
                 <div style={{ background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)", borderRadius: 12, padding: 24, textAlign: "center", color: "#fff" }}>
-                  <Text style={{ fontSize: 14, opacity: 0.9, margin: "0 0 8px" }}>Emails Sent</Text>
-                  <Text style={{ fontSize: 32, fontWeight: 700, margin: 0 }}>{emailsSent}</Text>
+                  <Text style={{ fontSize: 14, opacity: 0.9, margin: "0 0 8px" }}>Outgoing Emails</Text>
+                  <Text style={{ fontSize: 32, fontWeight: 700, margin: "0 0 4px" }}>{totalSent}</Text>
+                  <Text style={{ fontSize: 12, opacity: 0.9, margin: 0 }}>{newThreads} new · {replies} replies</Text>
                 </div>
               </Column>
             </Row>
@@ -123,19 +128,20 @@ export default function RealTimeReportEmail({
               <Column style={{ padding: "0 8px" }}>
                 <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
                   <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Avg. Response Time</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>{avgResponseTime}</Text>
+                  <Text style={{ fontSize: 20, fontWeight: 600, margin: "0 0 4px", color: "#1a1a1a" }}>{avgResponseTime}</Text>
+                  <Text style={{ fontSize: 12, color: "#64748b", margin: 0 }}>{responseTimeDistribution?.reduce((sum, item) => sum + item.count, 0) || 0} replies</Text>
                 </div>
               </Column>
               <Column style={{ padding: "0 8px" }}>
                 <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Inbox Zero Days</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>{inboxZeroWorkingDays}</Text>
-                </div>
-              </Column>
-              <Column style={{ padding: "0 8px" }}>
-                <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Consecutive Days</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>{consecutiveInboxZeroDays}</Text>
+                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Inbox Zero Stats</Text>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
+                    <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+                      <h3 style={{ margin: '0 0 10px 0', color: '#1a1a1a', fontSize: '18px' }}>Working Days</h3>
+                      <p style={{ margin: '0', color: '#1a1a1a', fontSize: '36px', fontWeight: 'bold' }}>{inboxZeroWorkingDays}</p>
+                      <p style={{ margin: '5px 0 0 0', color: '#666666', fontSize: '14px' }}>Current Streak: {inboxZeroStreak} days</p>
+                    </div>
+                  </div>
                 </div>
               </Column>
             </Row>

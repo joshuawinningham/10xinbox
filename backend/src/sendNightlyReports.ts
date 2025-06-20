@@ -39,6 +39,17 @@ interface User {
   email: string | null;
 }
 
+interface SentEmail {
+  email_id: string;
+  user_id: string;
+  sent_at: string;
+  to_email: string;
+  to_name: string;
+  subject: string;
+  body: string;
+  is_reply: boolean;
+}
+
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
 
 const supabase = createClient(
@@ -72,11 +83,16 @@ async function main() {
       }
       // Calculate yesterday and today in user's local time zone
       const now = DateTime.now().setZone(tz);
-      const yesterday = now.minus({ days: 1 }).startOf('day');
-      const today = now.startOf('day');
-      const yesterdayISO = yesterday.toISO();
-      const todayISO = today.toISO();
+      const yesterday = now.minus({ days: 1 });
       const yesterdayDateStr = yesterday.toISODate();
+      if (!yesterdayDateStr) {
+        throw new Error('Failed to generate yesterday\'s date string');
+      }
+
+      const todayDateStr = now.toISODate();
+      if (!todayDateStr) {
+        throw new Error('Failed to generate today\'s date string');
+      }
 
       // Check if report already sent for this user/date
       const { data: sentRow, error: sentError } = await supabase
@@ -93,16 +109,19 @@ async function main() {
       // Get all emails for the user from yesterday (user's local time)
       const { data: emails, error: emailsError } = await supabase
         .from('sent_emails')
-        .select('email_id, user_id, sent_at, to_email, to_name, subject, body')
+        .select('email_id, user_id, sent_at, to_email, to_name, subject, body, is_reply')
         .eq('user_id', user.user_id)
-        .gte('sent_at', yesterdayISO)
-        .lt('sent_at', todayISO)
+        .gte('sent_at', yesterdayDateStr)
+        .lt('sent_at', todayDateStr)
         .order('sent_at', { ascending: true });
 
       if (emailsError) {
         logger.error('Error fetching emails', { error: emailsError, userId: user.user_id });
         throw emailsError;
       }
+
+      // Type assertion since we know the shape of the data
+      const typedEmails = (emails || []) as SentEmail[];
 
       // Get emails_received from email_stats for the previous day
       let emailsReceived = 0;
@@ -112,12 +131,13 @@ async function main() {
         .eq('user_id', user.user_id)
         .eq('date', yesterdayDateStr)
         .single();
+
       if (statsRow && typeof statsRow.emails_received === 'number') {
         emailsReceived = statsRow.emails_received;
       }
 
       // Calculate basic metrics
-      const emailsSent = emails.length;
+      const emailsSent = typedEmails.length;
 
       // Calculate inbox zero working days and streak
       let inboxZeroWorkingDays = 0;
@@ -126,7 +146,7 @@ async function main() {
         // Get user's working hours settings
         const { data: settingsData, error: settingsError } = await supabase
           .from('user_settings')
-          .select('working_hours_start, working_hours_end, working_days')
+          .select('working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes')
           .eq('user_id', user.user_id)
           .single();
 
@@ -136,7 +156,7 @@ async function main() {
         }
 
         // Get the first day of the current month
-        const firstDayOfMonth = today.startOf('month');
+        const firstDayOfMonth = now.startOf('month');
         
         // Get inbox zero data from the database
         const { data: inboxZeroData, error: inboxZeroError } = await supabase
@@ -225,8 +245,8 @@ async function main() {
 
         // Check if token needs refresh
         const tokenExpiry = new Date(tokenRow.expires_at);
-        const now = new Date();
-        if (now >= tokenExpiry) {
+        const currentTime = new Date();
+        if (currentTime >= tokenExpiry) {
           logger.info('Refreshing expired Gmail token', { userId: user.user_id });
           try {
             oauth2Client.setCredentials({
@@ -260,8 +280,8 @@ async function main() {
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
         // 2. Calculate after/before in UTC seconds
-        const after = Math.floor(yesterday.toUTC().toSeconds());
-        const before = Math.floor(today.toUTC().toSeconds());
+        const after = Math.floor(yesterday.toUTC().toUnixInteger());
+        const before = Math.floor(now.toUTC().toUnixInteger());
         
         logger.info('Fetching Gmail messages', { 
           userId: user.user_id, 
@@ -371,9 +391,14 @@ async function main() {
         // Don't throw here, continue with empty hourlyReceived array
       }
 
+      // Calculate email stats
+      const newThreads = typedEmails.filter(email => !email.is_reply).length;
+      const replies = typedEmails.filter(email => email.is_reply).length;
+      const totalSent = newThreads + replies;
+
       // Calculate hourly breakdown
       const hourlySent = new Array(24).fill(0);
-      emails.forEach((email) => {
+      typedEmails.forEach((email) => {
         // Convert sent_at to user's local timezone
         const localTime = DateTime.fromISO(email.sent_at).setZone(tz);
         if (localTime.isValid) {
@@ -403,7 +428,7 @@ async function main() {
 
       // Build sentEmailsWithViews for the report
       const sentEmailsWithViews = await Promise.all(
-        emails.map(async (email) => {
+        typedEmails.map(async (email) => {
           const { data: opens, error: opensError } = await supabase
             .from('email_opens')
             .select('id')
@@ -414,55 +439,39 @@ async function main() {
             email: email.to_email || '',
             subject: email.subject || '',
             views: opens ? opens.length : 0,
+            isReply: email.is_reply
           };
         })
       );
 
-      // Before sending the email, format the date safely
-      const formattedDate = yesterdayDateStr
-        ? DateTime.fromISO(yesterdayDateStr).toFormat('MM-dd-yyyy')
-        : DateTime.now().toFormat('MM-dd-yyyy');
+      // Send the email
+      await sendEmail({
+        to: user.email,
+        subject: `Your Daily Email Report for ${yesterday.toFormat('MM-dd-yyyy')}`,
+        react: DailyReportEmail({
+          date: yesterdayDateStr,
+          newThreads,
+          replies,
+          totalSent,
+          emailsReceived: statsRow?.emails_received ?? 0,
+          avgResponseTime,
+          inboxZeroWorkingDays,
+          inboxZeroStreak,
+          hourlySent,
+          hourlyReceived,
+          peakActivityHour,
+          busiestHour,
+          sentEmailsWithViews,
+          timezone: tz
+        })
+      });
 
-      // Send daily report
-      await delay(1000);
-      try {
-        await sendEmail({
-          to: user.email,
-          subject: `Your Daily Email KPI Report for ${formattedDate}`,
-          react: DailyReportEmail({
-            date: yesterdayISO || '',
-            emailsSent,
-            emailsReceived,
-            avgResponseTime,
-            inboxZeroWorkingDays,
-            inboxZeroStreak,
-            hourlySent,
-            hourlyReceived,
-            topSenders: [],
-            topRecipients: [],
-            responseTimeDistribution: [],
-            peakActivityHour,
-            busiestHour,
-            totalResponseTime: 0,
-            quickestResponseTime: undefined,
-            slowestResponseTime: undefined,
-            emailThreads: 0,
-            averageThreadLength: 0,
-            longestThread: 0,
-            sentEmailsWithViews,
-            timezone: tz
-          }),
-        });
-        logger.info(`Successfully sent daily report to ${user.email}`);
-        // Insert a row into reports_sent to mark the report as sent
-        await supabase.from('reports_sent').insert({
-          user_id: user.user_id,
-          date: yesterdayDateStr, // YYYY-MM-DD
-          sent_at: new Date().toISOString()
-        });
-      } catch (error) {
-        logger.error('Failed to send daily report', { error, userId: user.user_id, email: user.email });
-      }
+      // Insert a row into reports_sent to mark the report as sent
+      await supabase.from('reports_sent').insert({
+        user_id: user.user_id,
+        date: yesterdayDateStr, // YYYY-MM-DD
+        sent_at: new Date().toISOString()
+      });
     }
     logger.info('Completed nightly report generation');
   } catch (error) {

@@ -5,6 +5,7 @@ export interface WorkingHours {
   start: string; // HH:MM format
   end: string; // HH:MM format
   days: number[]; // Array of day numbers (1=Monday, 2=Tuesday, etc.)
+  bufferMinutes: number; // Buffer time in minutes before end of working hours
 }
 
 export function useWorkingHours() {
@@ -12,7 +13,8 @@ export function useWorkingHours() {
   const [workingHours, setWorkingHours] = useState<WorkingHours>({
     start: '09:00',
     end: '17:00',
-    days: [1, 2, 3, 4, 5] // Monday to Friday by default
+    days: [1, 2, 3, 4, 5], // Monday to Friday by default
+    bufferMinutes: 30 // 30 minutes buffer by default
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +36,8 @@ export function useWorkingHours() {
         setWorkingHours({
           start: data.working_hours_start || '09:00',
           end: data.working_hours_end || '17:00',
-          days: data.working_days || [1, 2, 3, 4, 5]
+          days: data.working_days || [1, 2, 3, 4, 5],
+          bufferMinutes: data.inbox_zero_buffer_minutes || 30
         });
         setLoading(false);
       })
@@ -56,7 +59,8 @@ export function useWorkingHours() {
         user_id: user.id, 
         working_hours_start: newWorkingHours.start,
         working_hours_end: newWorkingHours.end,
-        working_days: newWorkingHours.days
+        working_days: newWorkingHours.days,
+        inbox_zero_buffer_minutes: newWorkingHours.bufferMinutes
       }),
     })
       .then(res => {

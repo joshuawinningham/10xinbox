@@ -37,121 +37,84 @@ async function getValidAccessToken(user_id: string) {
   return newAccessToken;
 }
 
-async function calculateResponseTime(user_id: string, tz: string) {
+export async function calculateResponseTime(user_id: string, tz: string) {
+  const now = DateTime.now().setZone(tz);
+  const start = now.startOf('day');
+  const end = start.plus({ days: 1 });
+  const dateStr = start.toISODate();
+  const nextDay = end.toISODate();
+
+  // Get sent emails that are replies from the sent_emails table
+  const { data: sentEmails, error: sentEmailsError } = await supabase
+    .from('sent_emails')
+    .select('gmail_message_id, sent_at')
+    .eq('user_id', user_id)
+    .eq('is_reply', true)
+    .gte('sent_at', dateStr)
+    .lt('sent_at', nextDay)
+    .not('gmail_message_id', 'is', null); // Only get emails with Gmail message IDs
+
+  if (sentEmailsError) {
+    throw new Error(`Failed to fetch sent emails: ${sentEmailsError.message}`);
+  }
+
+  if (!sentEmails || sentEmails.length === 0) {
+    return { average_response_time: null, count: 0 };
+  }
+
+  // Get access token for Gmail API
   const accessToken = await getValidAccessToken(user_id);
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: accessToken });
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-  const now = DateTime.now().setZone(tz);
-  const start = now.startOf('day');
-  const end = start.plus({ days: 1 });
-  const after = Math.floor(start.toUTC().toSeconds());
-  const before = Math.floor(end.toUTC().toSeconds());
-  async function fetchAllMessages(q: string) {
-    let messages: any[] = [];
-    let nextPageToken: string | undefined = undefined;
-    do {
-      const res: { data: gmail_v1.Schema$ListMessagesResponse } = await gmail.users.messages.list({
-        userId: 'me',
-        q,
-        pageToken: nextPageToken,
-        maxResults: 500,
-      });
-      if (res.data.messages) messages = messages.concat(res.data.messages);
-      nextPageToken = res.data.nextPageToken ?? undefined;
-    } while (nextPageToken);
-    return messages;
-  }
-  const receivedMessages = await fetchAllMessages(`after:${after} before:${before} label:INBOX -from:me`);
-  if (receivedMessages.length === 0) return { average_response_time: null, count: 0 };
+
   let totalResponseTime = 0;
   let responseCount = 0;
-  const usedReplyIds = new Set();
-  for (const msg of receivedMessages) {
+
+  // For each reply, get the original message it's replying to
+  for (const email of sentEmails) {
     try {
-      const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata' });
-      const receivedInternalDate = Number(res.data.internalDate);
-      const threadId = res.data.threadId;
-      const headers = res.data.payload?.headers || [];
-      const messageIdHeader = headers.find((h: any) => h.name?.toLowerCase() === 'message-id');
-      const messageIdValue = messageIdHeader?.value;
-      if (!threadId) continue;
-      const threadRes = await gmail.users.threads.get({ userId: 'me', id: threadId });
-      const threadMessages = threadRes.data.messages || [];
-      // Try to find reply in thread (must not be used already, and must match In-Reply-To)
-      const reply = threadMessages.find((m: any) => {
-        if (m.id === msg.id) return false;
-        if (usedReplyIds.has(m.id)) return false;
-        if (m.labelIds && m.labelIds.includes('SENT')) {
-          const sentDate = Number(m.internalDate);
-          const replyHeaders = m.payload?.headers || [];
-          const inReplyTo = replyHeaders.find((h: any) => h.name?.toLowerCase() === 'in-reply-to')?.value;
-          const subject = replyHeaders.find((h: any) => h.name?.toLowerCase() === 'subject')?.value;
-          if (!subject?.startsWith('Re:')) return false;
-          if (messageIdValue && inReplyTo) {
-            const cleanMessageId = messageIdValue.replace(/^<|>$/g, '');
-            const cleanInReplyTo = inReplyTo.replace(/^<|>$/g, '');
-            return sentDate > receivedInternalDate && cleanInReplyTo === cleanMessageId;
-          }
-          if (sentDate > receivedInternalDate) {
-            const earlierReplies = threadMessages.filter((otherMsg: any) => {
-              if (otherMsg.id === m.id || otherMsg.id === msg.id) return false;
-              if (!otherMsg.labelIds?.includes('SENT')) return false;
-              const otherSentDate = Number(otherMsg.internalDate);
-              return otherSentDate > receivedInternalDate && otherSentDate < sentDate;
-            });
-            return earlierReplies.length === 0;
-          }
-        }
-        return false;
+      if (!email.gmail_message_id) continue;
+
+      const msgRes = await gmail.users.messages.get({
+        userId: 'me',
+        id: email.gmail_message_id,
+        format: 'metadata',
+        metadataHeaders: ['In-Reply-To', 'References']
       });
-      if (reply) {
-        usedReplyIds.add(reply.id);
-        const replyDate = Number(reply.internalDate);
-        const responseTime = replyDate - receivedInternalDate;
-        totalResponseTime += responseTime;
+
+      const inReplyTo = msgRes.data.payload?.headers?.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
+      if (!inReplyTo) continue;
+
+      // Get the original message
+      const originalMsgId = inReplyTo.replace(/[<>]/g, '');
+      const originalMsgRes = await gmail.users.messages.get({
+        userId: 'me',
+        id: originalMsgId,
+        format: 'metadata',
+        metadataHeaders: ['Date']
+      });
+
+      const originalDate = originalMsgRes.data.payload?.headers?.find(h => h.name === 'Date')?.value;
+      if (!originalDate) continue;
+
+      const receivedTime = new Date(originalDate).getTime();
+      const sentTime = new Date(email.sent_at).getTime();
+      
+      if (sentTime > receivedTime) {
+        totalResponseTime += sentTime - receivedTime;
         responseCount++;
-      } else if (messageIdValue) {
-        try {
-          const searchQuery = `from:me after:${Math.floor(receivedInternalDate / 1000)} before:${Math.floor(receivedInternalDate / 1000) + 86400}`;
-          const searchRes = await gmail.users.messages.list({
-            userId: 'me',
-            q: searchQuery,
-            maxResults: 10
-          });
-          if (searchRes.data.messages) {
-            for (const sentMsg of searchRes.data.messages) {
-              if (usedReplyIds.has(sentMsg.id)) continue;
-              const sentMsgRes = await gmail.users.messages.get({
-                userId: 'me',
-                id: sentMsg.id!,
-                format: 'metadata',
-                metadataHeaders: ['In-Reply-To', 'References', 'Subject']
-              });
-              const replyHeaders = sentMsgRes.data.payload?.headers || [];
-              const inReplyTo = replyHeaders.find((h: any) => h.name?.toLowerCase() === 'in-reply-to')?.value;
-              const subject = replyHeaders.find((h: any) => h.name?.toLowerCase() === 'subject')?.value;
-              const sentDate = Number(sentMsgRes.data.internalDate);
-              if (inReplyTo && subject?.startsWith('Re:') && sentDate > receivedInternalDate) {
-                const cleanMessageId = messageIdValue.replace(/^<|>$/g, '');
-                const cleanInReplyTo = inReplyTo.replace(/^<|>$/g, '');
-                if (cleanInReplyTo === cleanMessageId) {
-                  usedReplyIds.add(sentMsg.id!);
-                  const responseTime = sentDate - receivedInternalDate;
-                  totalResponseTime += responseTime;
-                  responseCount++;
-                  break;
-                }
-              }
-            }
-          }
-        } catch {}
       }
-    } catch {}
+    } catch (error) {
+      console.error('Error processing email:', error);
+      continue;
+    }
   }
-  if (responseCount === 0) return { average_response_time: null, count: 0 };
-  const avgSeconds = Math.round(totalResponseTime / responseCount / 1000);
-  return { average_response_time: avgSeconds, count: responseCount };
+
+  return {
+    average_response_time: responseCount > 0 ? totalResponseTime / responseCount : null,
+    count: responseCount
+  };
 }
 
 async function main() {

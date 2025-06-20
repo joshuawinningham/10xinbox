@@ -8,15 +8,17 @@ import { useTodayEmailStats } from '@/hooks/useTodayEmailStats';
 import { useSendReport } from '@/hooks/useSendReport';
 import { useEmailStats, EmailStatsView } from '@/hooks/useEmailStats';
 import { useAuth } from '@/hooks/useAuth';
+import { useTimeZone } from '@/hooks/useTimeZone';
 import { connectGmail } from '@/lib/gmail';
 import PageHeading from '@/components/PageHeading';
 
 export default function Dashboard() {
   const [period, setPeriod] = useState<EmailStatsView>("hourly");
-  const { emailsSent, emailsReceived, emailsSentYesterday, emailsReceivedYesterday, loading, error } = useTodayEmailStats();
+  const { emailsSent, emailsReceived, emailsSentYesterday, emailsReceivedYesterday, newThreads, replies, loading, error } = useTodayEmailStats();
   const { sendReport, loading: sending, success, error: sendError } = useSendReport();
   const { data: statsData, loading: statsLoading, error: statsError } = useEmailStats(period);
   const { user } = useAuth();
+  const { timeZone, loading: tzLoading } = useTimeZone();
   const [responseTime, setResponseTime] = useState<number | null>(null);
   const [responseCount, setResponseCount] = useState<number>(0);
   const [responseLoading, setResponseLoading] = useState(false);
@@ -28,31 +30,31 @@ export default function Dashboard() {
   const [showPermissionBanner, setShowPermissionBanner] = useState(true);
 
   useEffect(() => {
-    const fetchResponseTime = async () => {
-      if (!user?.id) return;
+    if (!user?.id || !timeZone || tzLoading) {
       setResponseLoading(true);
-      setResponseError(null);
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/response-time`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: user.id }),
-        });
-        if (!res.ok) throw new Error('Failed to fetch response time');
-        const data = await res.json();
-        setResponseTime(data.average_response_time);
-        setResponseCount(data.count);
-      } catch (err) {
-        setResponseError((err as Error).message);
-      } finally {
+      return;
+    }
+    setResponseLoading(true);
+    fetch(`${import.meta.env.VITE_API_URL}/api/gmail/response-time`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.id, time_zone: timeZone, day: 'today' }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        setResponseTime(data.average_response_time ? Math.round(data.average_response_time / 1000) : null);
+        setResponseCount(data.count || 0);
+        setResponseError(null);
+      })
+      .catch(err => {
+        setResponseError(err.message || 'Failed to fetch response time');
+        setResponseTime(null);
+        setResponseCount(0);
+      })
+      .finally(() => {
         setResponseLoading(false);
-      }
-    };
-    fetchResponseTime();
-    // Add periodic refresh every 5 minutes
-    const interval = setInterval(fetchResponseTime, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [user?.id]);
+      });
+  }, [user?.id, timeZone, tzLoading]);
 
   // Add event listener to refresh response time when email is sent
   useEffect(() => {
@@ -76,8 +78,8 @@ export default function Dashboard() {
             if (!res.ok) throw new Error('Failed to fetch response time');
             const data = await res.json();
             console.log('Response time data received:', data);
-            setResponseTime(data.average_response_time);
-            setResponseCount(data.count);
+            setResponseTime(data.average_response_time ? Math.round(data.average_response_time / 1000) : null);
+            setResponseCount(data.count || 0);
           } catch (err) {
             console.error('Error fetching response time:', err);
             setResponseError((err as Error).message);
@@ -338,18 +340,24 @@ export default function Dashboard() {
 
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-2xl font-bold">Emails Sent<br />Today</CardTitle>
+            <CardTitle className="text-2xl font-bold">Outgoing Emails<br />Today</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-primary">
               {loading ? '...' : error ? '--' : sent}
             </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              {loading || error ? '--' :
-                emailsSentYesterday === 0 || emailsSentYesterday == null
-                  ? '+0% from yesterday'
-                  : `${emailsSentYesterday === 0 ? '+0' : ((sent - emailsSentYesterday) / emailsSentYesterday * 100 > 0 ? '+' : '')}${((sent - emailsSentYesterday) / (emailsSentYesterday || 1) * 100).toFixed(0)}% from yesterday`}
-            </p>
+            <div className="text-sm text-muted-foreground mt-2">
+              {loading || error ? '--' : (
+                <>
+                  <div>{newThreads} new · {replies} replies</div>
+                  <div className="mt-1">
+                    {emailsSentYesterday === 0 || emailsSentYesterday == null
+                      ? '+0% from yesterday'
+                      : `${emailsSentYesterday === 0 ? '+0' : ((sent - emailsSentYesterday) / emailsSentYesterday * 100 > 0 ? '+' : '')}${((sent - emailsSentYesterday) / (emailsSentYesterday || 1) * 100).toFixed(0)}% from yesterday`}
+                  </div>
+                </>
+              )}
+            </div>
           </CardContent>
         </Card>
 

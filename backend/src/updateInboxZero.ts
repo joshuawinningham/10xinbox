@@ -43,7 +43,7 @@ async function updateInboxZeroData() {
         // Get user's working hours settings
         const { data: settingsData, error: settingsError } = await supabase
           .from('user_settings')
-          .select('working_hours_start, working_hours_end, working_days')
+          .select('working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes')
           .eq('user_id', user.id)
           .single();
 
@@ -95,10 +95,27 @@ async function updateInboxZeroData() {
           continue;
         }
 
-        // Fetch messages for today
+        // Calculate the buffer cutoff time
+        const bufferMinutes = settingsData?.inbox_zero_buffer_minutes || 30;
+        const workingHoursEnd = settingsData?.working_hours_end || '17:00:00';
+        const [endHour, endMinute] = workingHoursEnd.split(':').map(Number);
+        const bufferCutoff = now.set({ hour: endHour, minute: endMinute }).minus({ minutes: bufferMinutes });
+
+        // If it's before the buffer cutoff time, count all emails for the day
+        // If it's after the buffer cutoff time, only count emails received before the cutoff
+        let queryEndTime;
+        if (now < bufferCutoff) {
+          // Before buffer cutoff - count all emails for the day
+          queryEndTime = endOfDay;
+        } else {
+          // After buffer cutoff - only count emails before the cutoff
+          queryEndTime = bufferCutoff;
+        }
+
+        // Fetch messages up to the calculated end time
         const response = await gmail.users.messages.list({
           userId: 'me',
-          q: `after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(endOfDay.toSeconds())}`,
+          q: `after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(queryEndTime.toSeconds())}`,
           maxResults: 500
         });
 
