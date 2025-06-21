@@ -47,11 +47,12 @@ export async function calculateResponseTime(
   
     const sentMessages = sentRes.data.messages || [];
     if (sentMessages.length === 0) {
-      return { average_response_time: null, count: 0, totalSent: 0 };
+      return { average_response_time: null, count: 0, totalSent: 0, totalReplies: 0 };
     }
   
     let totalResponseTime = 0;
     let responseCount = 0;
+    let totalReplies = 0;
   
     for (const sentMsg of sentMessages) {
       if (!sentMsg.id || !sentMsg.threadId) continue;
@@ -70,6 +71,7 @@ export async function calculateResponseTime(
           const hasReferences = headers?.some(h => h.name?.toLowerCase() === 'references');
   
           if ((hasInReplyTo || hasReferences) && subject.startsWith('Re:')) {
+              totalReplies++;
               const inReplyToHeader = headers?.find(h => h.name?.toLowerCase() === 'in-reply-to')?.value;
               let originalMessageId = null;
               
@@ -173,6 +175,7 @@ export async function calculateResponseTime(
       average_response_time: responseCount > 0 ? Math.round(totalResponseTime / responseCount) : null,
       count: responseCount,
       totalSent: sentMessages.length,
+      totalReplies: totalReplies,
     };
 }
 
@@ -225,4 +228,4 @@ async function main() {
 // Only run main() if this file is executed directly
 if (require.main === module) {
     main();
-} 
+}

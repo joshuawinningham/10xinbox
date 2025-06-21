@@ -182,8 +182,8 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     const before = Math.floor(end.toUTC().toSeconds());
 
     // 5. Get detailed sent emails to calculate new threads vs replies
-    const { count: replyCount, totalSent } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day === 'yesterday' ? 'yesterday' : 'today');
-    const replies = replyCount || 0;
+    const { totalReplies, totalSent } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day === 'yesterday' ? 'yesterday' : 'today');
+    const replies = totalReplies || 0;
     const newThreads = totalSent - replies;
 
     // 6. Count received emails for the day (Inbox, not sent by me)
