@@ -30,7 +30,7 @@ export default function Dashboard() {
   const [showPermissionBanner, setShowPermissionBanner] = useState(true);
 
   useEffect(() => {
-    if (!user?.id || tzLoading) {
+    if (!user?.id || tzLoading || timeZone === 'UTC') {
       return;
     }
     setResponseLoading(true);
