@@ -30,8 +30,7 @@ export default function Dashboard() {
   const [showPermissionBanner, setShowPermissionBanner] = useState(true);
 
   useEffect(() => {
-    if (!user?.id || !timeZone || tzLoading) {
-      setResponseLoading(true);
+    if (!user?.id || tzLoading) {
       return;
     }
     setResponseLoading(true);

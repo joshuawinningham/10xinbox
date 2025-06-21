@@ -15,8 +15,7 @@ export function useTodayEmailStats() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user?.id || !timeZone || tzLoading) {
-      setLoading(true);
+    if (!user?.id || tzLoading) {
       return;
     }
     setLoading(true);
