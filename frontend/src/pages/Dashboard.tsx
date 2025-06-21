@@ -96,7 +96,7 @@ export default function Dashboard() {
       console.log('Removing refreshResponseTime event listener');
       window.removeEventListener('refreshResponseTime', handleRefreshResponseTime);
     };
-  }, [user?.id]);
+  }, [user?.id, timeZone]);
 
   useEffect(() => {
     const fetchInboxZero = async () => {
