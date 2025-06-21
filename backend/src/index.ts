@@ -855,64 +855,56 @@ fastify.post('/api/gmail/top-senders', async (request, reply) => {
 });
 
 // Endpoint to get average response time for today (or a given day)
-fastify.post('/api/gmail/response-time', async (request, reply) => {
-    const { user_id, time_zone, day } = request.body as { user_id?: string, time_zone?: string, day?: 'today' | 'yesterday' };
-    if (!user_id) {
-      return reply.status(400).send({ error: 'Missing user_id' });
-    }
-    try {
-      const tz = time_zone || 'UTC';
-      const date = DateTime.now().setZone(tz).toISODate();
-      const cacheKey = `response-time:${user_id}:${date}:${day || 'today'}`;
+fastify.get('/api/gmail/response-time', async (request, reply) => {
+  const { user_id, time_zone, day } = request.query as { user_id?: string, time_zone?: string, day?: 'today' | 'yesterday' };
 
-      const { data: cachedData, error: cacheError } = await supabase
-        .from('kv_store')
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+
+  try {
+    const tz = time_zone || 'UTC';
+    const date = (day === 'today' ? DateTime.now().setZone(tz) : DateTime.now().setZone(tz).minus({ days: 1 })).toISODate();
+
+    if (date) {
+      const { data: cache } = await supabase
+        .from('response_time_cache')
         .select('average_response_time, reply_count, updated_at')
         .eq('user_id', user_id)
         .eq('date', date)
-        .eq('day', day)
         .single();
-
-      if (cacheError) {
-        fastify.log.error('Failed to fetch cached response time:', cacheError);
-        return reply.status(500).send({ error: 'Failed to fetch cached response time' });
-      }
-
-      if (cachedData && new Date().getTime() - new Date(cachedData.updated_at).getTime() < 300000) { // 5-minute cache
+      
+      if (cache && new Date().getTime() - new Date(cache.updated_at).getTime() < 300000) { // 5-minute cache
         return reply.send({
-          average_response_time: cachedData.average_response_time,
-          reply_count: cachedData.reply_count,
+          average_response_time: cache.average_response_time,
+          reply_count: cache.reply_count,
         });
       }
-  
-      const accessToken = await getValidAccessToken(user_id);
-      const oauth2Client = new google.auth.OAuth2();
-      oauth2Client.setCredentials({ access_token: accessToken });
-      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-  
-      const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day);
-      
-      // Update cache with the date
-      if (date) {
-        await supabase.from('kv_store').upsert({
-          user_id,
-          date,
-          day,
-          average_response_time,
-          reply_count: count,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id,date,day' });
-      }
-  
-      reply.send({ average_response_time, reply_count: count });
-    } catch (error: any) {
-      if (error.message.includes('Token has been expired or revoked') || error.message.includes('No tokens found for user')) {
-        return reply.status(401).send({ error: 'insufficient_permissions' });
-      }
-      fastify.log.error(error);
-      reply.status(500).send({ error: error.message || 'Failed to calculate response time' });
     }
-  });
+
+    const accessToken = await getValidAccessToken(user_id);
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz, day);
+
+    if (date) {
+      await supabase.from('response_time_cache').upsert({
+        user_id,
+        date,
+        average_response_time,
+        reply_count: count,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id,date' });
+    }
+
+    return reply.send({ average_response_time, reply_count: count });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: 'Failed to fetch response time' });
+  }
+});
 
 // Endpoint to get inbox count at the end of each day for the last N days
 fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
