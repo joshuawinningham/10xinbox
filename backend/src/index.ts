@@ -169,6 +169,13 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
       tz = settingsRow?.time_zone || 'UTC';
     }
 
+    fastify.log.info({
+      msg: 'DEBUG: fetch-stats request body',
+      user_id,
+      time_zone,
+      day,
+    });
+
     // 4. Get date range in user's time zone
     const now = DateTime.now().setZone(tz);
     let start, end;
@@ -182,7 +189,14 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     const before = Math.floor(end.toUTC().toSeconds());
 
     // 5. Get detailed sent emails to calculate new threads vs replies
-    const { count: replyCount, totalSent } = await calculateResponseTime(user_id, gmail, tz || 'UTC', day === 'yesterday' ? 'yesterday' : 'today');
+    const responseTimeResult = await calculateResponseTime(user_id, gmail, tz || 'UTC', day === 'yesterday' ? 'yesterday' : 'today');
+    const { count: replyCount, totalSent } = responseTimeResult;
+    
+    fastify.log.info({
+      msg: 'DEBUG: calculateResponseTime result',
+      result: responseTimeResult
+    });
+
     const replies = replyCount || 0;
     const newThreads = totalSent - replies;
 
@@ -210,15 +224,27 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
       }
     }
     
-    return reply.send({ 
+    const finalResponse = { 
       success: true, 
       total_sent: totalSent,
       new_threads: newThreads,
       replies: replies,
       emails_received 
+    };
+
+    fastify.log.info({
+      msg: 'DEBUG: final fetch-stats response',
+      response: finalResponse
     });
+
+    return reply.send(finalResponse);
   } catch (err: any) {
-    fastify.log.error(err);
+    fastify.log.error({
+      msg: 'ERROR in fetch-stats endpoint',
+      error: err.message,
+      stack: err.stack,
+      user_id
+    });
     // Check for insufficient permissions error from Google
     if (err && err.errors && Array.isArray(err.errors)) {
       const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
