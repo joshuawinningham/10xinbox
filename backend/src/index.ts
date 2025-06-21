@@ -441,6 +441,7 @@ fastify.post('/api/report/send', async (request, reply) => {
     const avgResponseTime = responseData.average_response_time != null
       ? formatDuration(responseData.average_response_time)
       : '--';
+    const replies = responseData.reply_count || 0;
 
     // Fetch all sent emails for the day
     const safeDateStr = dateStr || '';
@@ -454,9 +455,8 @@ fastify.post('/api/report/send', async (request, reply) => {
     if (sentEmailsError) throw sentEmailsError;
 
     // Calculate email stats
-    const newThreads = sentEmails.filter(email => !email.is_reply).length;
-    const replies = sentEmails.filter(email => email.is_reply).length;
-    const totalSent = newThreads + replies;
+    const totalSent = sentEmails.length;
+    const newThreads = totalSent - replies;
 
     // For each sent email, count the number of open events
     const sentEmailsWithViews = await Promise.all(
