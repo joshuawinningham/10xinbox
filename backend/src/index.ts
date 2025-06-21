@@ -855,8 +855,8 @@ fastify.post('/api/gmail/top-senders', async (request, reply) => {
 });
 
 // Endpoint to get average response time for today (or a given day)
-fastify.get('/api/gmail/response-time', async (request, reply) => {
-  const { user_id, time_zone, day } = request.query as { user_id?: string, time_zone?: string, day?: 'today' | 'yesterday' };
+fastify.post('/api/gmail/response-time', async (request, reply) => {
+  const { user_id, time_zone, day } = request.body as { user_id?: string, time_zone?: string, day?: 'today' | 'yesterday' };
 
   if (!user_id) {
     return reply.status(400).send({ error: 'Missing user_id' });
@@ -887,7 +887,7 @@ fastify.get('/api/gmail/response-time', async (request, reply) => {
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz, day);
+    const { average_response_time, count } = await calculateResponseTime(user_id, gmail, tz, day || 'today');
 
     if (date) {
       await supabase.from('response_time_cache').upsert({
