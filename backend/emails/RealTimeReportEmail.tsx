@@ -277,27 +277,27 @@ export default function RealTimeReportEmail({
             </table>
           </Section>
 
-          {/* Activity Hours */}
-          <Section style={styles.section}>
+          {/* Activity Hours (table-based for email compatibility) */}
+          <Section style={{ marginBottom: 32 }}>
             <Text style={styles.sectionTitle}>Activity Hours</Text>
-            <Row>
-              <Column style={{ padding: "0 8px" }}>
-                <div style={styles.card}>
-                  <Text style={styles.cardLabel}>Peak Activity</Text>
-                  <Text style={styles.cardValue}>
-                    {peakActivityHour !== undefined ? formatHour(peakActivityHour) : '--'}
-                  </Text>
-                </div>
-              </Column>
-              <Column style={{ padding: "0 8px" }}>
-                <div style={styles.card}>
-                  <Text style={styles.cardLabel}>Busiest Hour</Text>
-                  <Text style={styles.cardValue}>
-                    {busiestHour !== undefined ? formatHour(busiestHour) : '--'}
-                  </Text>
-                </div>
-              </Column>
-            </Row>
+            <table width="100%" cellPadding="0" cellSpacing="0" style={{ borderSpacing: 0, borderCollapse: 'collapse' }}>
+              <tr>
+                <td style={{ width: '50%', padding: '0 8px' }}>
+                  <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0', textAlign: 'center', minHeight: 90 }}>
+                    <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>Peak Activity</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>{peakActivityHour !== undefined ? formatHour(peakActivityHour) : '--'}</div>
+                    <div style={{ fontSize: 12, color: '#64748b', height: 16 }}>&nbsp;</div>
+                  </div>
+                </td>
+                <td style={{ width: '50%', padding: '0 8px' }}>
+                  <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0', textAlign: 'center', minHeight: 90 }}>
+                    <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>Busiest Hour</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>{busiestHour !== undefined ? formatHour(busiestHour) : '--'}</div>
+                    <div style={{ fontSize: 12, color: '#64748b', height: 16 }}>&nbsp;</div>
+                  </div>
+                </td>
+              </tr>
+            </table>
           </Section>
 
           {/* Top Contacts */}
