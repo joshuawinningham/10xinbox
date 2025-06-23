@@ -170,6 +170,84 @@ export async function calculateResponseTime(
           continue;
       }
     }
+
+    // Now also check for emails the user sent that received replies, and calculate response time to those replies
+    for (const sentMsg of sentMessages) {
+      if (!sentMsg.id || !sentMsg.threadId) continue;
+
+      try {
+        const msgRes = await gmail.users.messages.get({
+          userId: 'me',
+          id: sentMsg.id,
+          format: 'metadata',
+          metadataHeaders: ['Subject']
+        });
+
+        const headers = msgRes.data.payload?.headers;
+        const subject = headers?.find((h: any) => h.name?.toLowerCase() === 'subject')?.value || 'No Subject';
+        
+        // Skip if this is already a reply (we handled it above)
+        if (subject.startsWith('Re:')) continue;
+
+        // This is an original email sent by the user, check if it received a reply
+        const threadRes = await gmail.users.threads.get({
+          userId: 'me',
+          id: sentMsg.threadId,
+          format: 'full' 
+        });
+
+        const threadMessages = threadRes.data.messages || [];
+        const currentSentMessage = threadMessages.find(m => m.id === sentMsg.id);
+        
+        if (currentSentMessage?.internalDate) {
+          const sentTimestamp = parseInt(currentSentMessage.internalDate, 10);
+          
+          // Find replies to this email (messages after the sent message)
+          const repliesToSentEmail = threadMessages
+            .filter(m => {
+              if (m.id === sentMsg.id) return false; // Skip the sent message itself
+              if (m.labelIds?.includes('SENT')) return false; // Skip other sent messages
+              
+              const messageTimestamp = parseInt(m.internalDate!, 10);
+              return messageTimestamp > sentTimestamp;
+            })
+            .sort((a, b) => parseInt(a.internalDate!, 10) - parseInt(b.internalDate!, 10));
+
+          if (repliesToSentEmail.length > 0) {
+            // Find the user's response to the first reply
+            const firstReply = repliesToSentEmail[0];
+            const firstReplyTimestamp = parseInt(firstReply.internalDate!, 10);
+            
+            // Look for the user's response to this reply
+            const userResponseToReply = threadMessages
+              .filter(m => {
+                if (m.id === firstReply.id) return false; // Skip the reply itself
+                if (!m.labelIds?.includes('SENT')) return false; // Must be sent by user
+                
+                const messageTimestamp = parseInt(m.internalDate!, 10);
+                return messageTimestamp > firstReplyTimestamp;
+              })
+              .sort((a, b) => parseInt(a.internalDate!, 10) - parseInt(b.internalDate!, 10))[0];
+
+            if (userResponseToReply?.internalDate) {
+              const responseTimestamp = parseInt(userResponseToReply.internalDate, 10);
+              const diffSeconds = Math.round((responseTimestamp - firstReplyTimestamp) / 1000);
+              
+              if (diffSeconds >= 0) {
+                totalResponseTime += diffSeconds;
+                responseCount++;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error processing sent message for reply response time:', {
+          messageId: sentMsg.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+    }
   
     return {
       average_response_time: responseCount > 0 ? Math.round(totalResponseTime / responseCount) : null,
