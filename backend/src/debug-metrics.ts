@@ -146,7 +146,7 @@ async function testInboxZeroCalculation(userId: string) {
     });
     
     // Query Gmail API
-    const before = Math.floor(queryEndTime.toUTC().toSeconds());
+    const before = Math.floor(queryEndTime.toSeconds());
     
     // Use a more accurate method to count emails
     let inboxCount = 0;
@@ -155,7 +155,7 @@ async function testInboxZeroCalculation(userId: string) {
     do {
       const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
         userId: 'me',
-        q: `label:INBOX after:${Math.floor(startOfDay.toUTC().toSeconds())} before:${before}`,
+        q: `label:INBOX after:${Math.floor(startOfDay.toSeconds())} before:${before}`,
         maxResults: 500,
         pageToken: nextPageToken
       });

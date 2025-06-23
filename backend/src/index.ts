@@ -1009,7 +1009,7 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
         // Use buffer cutoff as the end time for counting emails
         const queryEndTime = bufferCutoff;
         
-        const before = Math.floor(queryEndTime.toUTC().toSeconds());
+        const before = Math.floor(queryEndTime.toSeconds());
         
         // Use accurate counting instead of resultSizeEstimate
         let inboxCount = 0;
@@ -1018,7 +1018,7 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
         do {
           const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
             userId: 'me',
-            q: `label:INBOX after:${Math.floor(startOfDay.toUTC().toSeconds())} before:${before}`,
+            q: `label:INBOX after:${Math.floor(startOfDay.toSeconds())} before:${before}`,
             maxResults: 500,
             pageToken: nextPageToken
           });
