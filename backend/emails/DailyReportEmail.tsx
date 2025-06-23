@@ -230,45 +230,49 @@ export default function DailyReportEmail({
             </Text>
           </Section>
 
-          {/* Main Stats Grid */}
-          <Section style={styles.section}>
-            <Row style={{ alignItems: 'stretch' }}>
-              <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={{ ...styles.gradientCard, background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}>
-                  <Text style={{ fontSize: 14, opacity: 0.9, margin: "0 0 8px" }}>Emails Received</Text>
-                  <Text style={{ fontSize: 32, fontWeight: 700, margin: 0 }}>{emailsReceived}</Text>
-                  <Text style={{ fontSize: 12, opacity: 0, margin: 0 }}>placeholder</Text>
-                </div>
-              </Column>
-              <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={{ ...styles.gradientCard, background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)" }}>
-                  <Text style={{ fontSize: 14, opacity: 0.9, margin: "0 0 8px" }}>Outgoing Emails</Text>
-                  <Text style={{ fontSize: 32, fontWeight: 700, margin: "0 0 4px" }}>{totalSent}</Text>
-                  <Text style={{ fontSize: 12, opacity: 0.9, margin: 0 }}>{newThreads} new · {replies} replies</Text>
-                </div>
-              </Column>
-            </Row>
+          {/* Main Stats Grid (table-based for email compatibility) */}
+          <Section style={{ marginBottom: 32 }}>
+            <table width="100%" cellPadding="0" cellSpacing="0" style={{ borderSpacing: 0, borderCollapse: 'collapse' }}>
+              <tr>
+                <td style={{ width: '50%', padding: '0 8px' }}>
+                  <div style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', borderRadius: 12, padding: 16, color: '#fff', textAlign: 'center', minHeight: 90 }}>
+                    <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 8 }}>Emails Received</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>{emailsReceived}</div>
+                    <div style={{ fontSize: 12, opacity: 0, height: 16 }}>&nbsp;</div>
+                  </div>
+                </td>
+                <td style={{ width: '50%', padding: '0 8px' }}>
+                  <div style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', borderRadius: 12, padding: 16, color: '#fff', textAlign: 'center', minHeight: 90 }}>
+                    <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 8 }}>Outgoing Emails</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>{totalSent}</div>
+                    <div style={{ fontSize: 12, opacity: 0.9 }}>{newThreads} new &middot; {replies} replies</div>
+                  </div>
+                </td>
+              </tr>
+            </table>
           </Section>
 
-          {/* Performance Metrics */}
-          <Section style={styles.section}>
+          {/* Performance Metrics (table-based for email compatibility) */}
+          <Section style={{ marginBottom: 32 }}>
             <Text style={styles.sectionTitle}>Performance Metrics</Text>
-            <Row style={{ alignItems: 'stretch' }}>
-              <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={styles.card}>
-                  <Text style={styles.cardLabel}>Avg. Response Time</Text>
-                  <Text style={styles.cardValue}>{avgResponseTime}</Text>
-                  <Text style={styles.cardSubtext}>{replies} replies</Text>
-                </div>
-              </Column>
-              <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={styles.card}>
-                  <Text style={styles.cardLabel}>Inbox Zero Days</Text>
-                  <Text style={styles.cardValue}>{inboxZeroWorkingDays}</Text>
-                  <Text style={styles.cardSubtext}>Current Streak: {inboxZeroStreak} days</Text>
-                </div>
-              </Column>
-            </Row>
+            <table width="100%" cellPadding="0" cellSpacing="0" style={{ borderSpacing: 0, borderCollapse: 'collapse' }}>
+              <tr>
+                <td style={{ width: '50%', padding: '0 8px' }}>
+                  <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0', textAlign: 'center', minHeight: 90 }}>
+                    <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>Avg. Response Time</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>{avgResponseTime}</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>{replies} replies</div>
+                  </div>
+                </td>
+                <td style={{ width: '50%', padding: '0 8px' }}>
+                  <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0', textAlign: 'center', minHeight: 90 }}>
+                    <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>Inbox Zero Days</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>{inboxZeroWorkingDays}</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>Current Streak: {inboxZeroStreak} days</div>
+                  </div>
+                </td>
+              </tr>
+            </table>
           </Section>
 
           {/* Activity Hours */}
