@@ -2293,6 +2293,32 @@ fastify.post('/api/test/inbox-zero-buffer', async (request, reply) => {
   }
 });
 
+// Endpoint to restore a Gmail message from trash (remove TRASH, add INBOX)
+fastify.post('/api/gmail/message/restore', async (request, reply) => {
+  const { user_id, message_id } = request.body as { user_id?: string, message_id?: string };
+  if (!user_id || !message_id) {
+    return reply.status(400).send({ error: 'Missing user_id or message_id' });
+  }
+  try {
+    const accessToken = await getValidAccessToken(user_id);
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    await gmail.users.messages.modify({
+      userId: 'me',
+      id: message_id,
+      requestBody: {
+        addLabelIds: ['INBOX'],
+        removeLabelIds: ['TRASH'],
+      },
+    });
+    return reply.send({ success: true });
+  } catch (err) {
+    console.error('Failed to restore message:', err);
+    return reply.status(500).send({ error: 'Failed to restore message' });
+  }
+});
+
 const start = async () => {
   try {
     const port = Number(process.env.PORT) || 3001;

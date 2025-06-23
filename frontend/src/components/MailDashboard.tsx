@@ -370,8 +370,31 @@ export default function MailDashboard() {
         handleNextPage();
       }
       toast({
-        title: 'Email moved to trash',
-        description: 'You can recover it from the Trash folder in Gmail.',
+        title: 'Conversation moved to Trash.',
+        action: (
+          <button
+            className="ml-2 underline text-blue-400 hover:text-blue-300 text-sm bg-transparent border-0 p-0"
+            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            onClick={async () => {
+              // Undo: move email back to inbox
+              try {
+                const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/message/restore`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ user_id: user.id, message_id: emailId })
+                });
+                if (!res.ok) throw new Error('Failed to restore email');
+                // Optionally, refetch or optimistically restore
+                setEmails(prev => [{ ...prev.find(e => e.id === emailId)!, labelIds: ['INBOX'] }, ...prev]);
+                toast({ title: 'Conversation restored to Inbox.' });
+              } catch (err) {
+                toast({ title: 'Failed to restore email', variant: 'destructive' });
+              }
+            }}
+          >
+            Undo
+          </button>
+        ),
       });
     } catch (err: any) {
       console.error('Error moving email to trash:', err);
