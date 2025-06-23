@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Link } f
 import { LayoutDashboard, MailIcon, PanelLeft, PanelLeftClose, Settings, Calendar, Eye, BarChart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Toaster } from '@/components/ui/toaster';
 import Dashboard from '@/pages/Dashboard';
 import SettingsLayout from '@/pages/settings/Layout';
 import SettingsProfile from '@/pages/settings/Profile';
@@ -169,6 +170,7 @@ function App() {
           <Route path="/email-tracking" element={<PrivateRoute><EmailTracking /></PrivateRoute>} />
         </Routes>
       </Layout>
+      <Toaster />
     </Router>
   );
 }
