@@ -60,6 +60,136 @@ export type RealTimeReportEmailProps = {
 
 const baseUrl = "https://email-kpi.vercel.app";
 
+// Consistent styling constants
+const styles = {
+  container: {
+    background: "#fff",
+    borderRadius: 12,
+    padding: 32,
+    margin: "40px auto",
+    maxWidth: 600,
+    boxShadow: "0 2px 12px #0001"
+  },
+  header: {
+    textAlign: "center" as const,
+    marginBottom: 32
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 700,
+    margin: 0,
+    letterSpacing: -0.5,
+    color: "#1a1a1a"
+  },
+  subtitle: {
+    fontSize: 16,
+    color: "#666",
+    margin: "8px 0 0"
+  },
+  section: {
+    marginBottom: 32
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 600,
+    marginBottom: 16,
+    color: "#1a1a1a"
+  },
+  card: {
+    background: "#f8fafc",
+    borderRadius: 12,
+    padding: 24,
+    border: "1px solid #e2e8f0",
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    textAlign: 'center' as const,
+  },
+  gradientCard: {
+    borderRadius: 12,
+    padding: 16,
+    textAlign: "center" as const,
+    color: "#fff",
+    height: '100%',
+    minHeight: 90,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+  },
+  cardLabel: {
+    fontSize: 14,
+    color: "#64748b",
+    margin: "0 0 8px"
+  },
+  cardValue: {
+    fontSize: 28,
+    fontWeight: 700,
+    margin: "0 0 8px",
+    color: "#1a1a1a"
+  },
+  cardSubtext: {
+    fontSize: 12,
+    color: "#64748b",
+    margin: 0
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse' as const
+  },
+  tableHeader: {
+    padding: "12px 8px",
+    textAlign: 'left' as const,
+    borderBottom: "1px solid #e2e8f0",
+    fontSize: 14,
+    color: "#64748b",
+    fontWeight: 500
+  },
+  tableHeaderRight: {
+    padding: "12px 8px",
+    textAlign: 'right' as const,
+    borderBottom: "1px solid #e2e8f0",
+    fontSize: 14,
+    color: "#64748b",
+    fontWeight: 500
+  },
+  tableCell: {
+    padding: "12px 8px",
+    borderBottom: "1px solid #e2e8f0",
+    fontSize: 14,
+    color: "#1a1a1a"
+  },
+  tableCellRight: {
+    padding: "12px 8px",
+    textAlign: 'right' as const,
+    borderBottom: "1px solid #e2e8f0",
+    fontSize: 14,
+    color: "#1a1a1a"
+  },
+  footer: {
+    textAlign: "center" as const,
+    marginTop: 32,
+    paddingTop: 24,
+    borderTop: "1px solid #e2e8f0"
+  },
+  footerText: {
+    fontSize: 14,
+    color: "#64748b",
+    margin: "0 0 16px"
+  },
+  button: {
+    background: "#2563eb",
+    color: "#fff",
+    padding: "12px 24px",
+    borderRadius: 8,
+    textDecoration: "none",
+    fontSize: 14,
+    fontWeight: 500
+  }
+};
+
 export default function RealTimeReportEmail({
   date,
   newThreads,
@@ -90,29 +220,30 @@ export default function RealTimeReportEmail({
     <Html>
       <Head />
       <Body style={{ backgroundColor: "#f6f9fc", fontFamily: "Inter, Arial, sans-serif", margin: 0, padding: 0 }}>
-        <Container style={{ background: "#fff", borderRadius: 12, padding: 32, margin: "40px auto", maxWidth: 600, boxShadow: "0 2px 12px #0001" }}>
+        <Container style={styles.container}>
           {/* Header with logo and title */}
-          <Section style={{ textAlign: "center", marginBottom: 32 }}>
+          <Section style={styles.header}>
             <Img src={`${baseUrl}/logo.png`} width={64} height={64} alt="Logo" style={{ margin: "0 auto 16px" }} />
-            <Text style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: -0.5, color: "#1a1a1a" }}>
+            <Text style={styles.title}>
               Your Real-Time Email KPI Report
             </Text>
-            <Text style={{ fontSize: 16, color: "#666", margin: "8px 0 0" }}>
+            <Text style={styles.subtitle}>
               {formatDate(date)}
             </Text>
           </Section>
 
           {/* Main Stats Grid */}
-          <Section style={{ marginBottom: 32 }}>
-            <Row>
+          <Section style={styles.section}>
+            <Row style={{ alignItems: 'stretch' }}>
               <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)", borderRadius: 12, padding: 24, textAlign: "center", color: "#fff", height: '100%' }}>
+                <div style={{ ...styles.gradientCard, background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}>
                   <Text style={{ fontSize: 14, opacity: 0.9, margin: "0 0 8px" }}>Emails Received</Text>
                   <Text style={{ fontSize: 32, fontWeight: 700, margin: 0 }}>{emailsReceived}</Text>
+                  <Text style={{ fontSize: 12, opacity: 0, margin: 0 }}>placeholder</Text>
                 </div>
               </Column>
               <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={{ background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)", borderRadius: 12, padding: 24, textAlign: "center", color: "#fff", height: '100%' }}>
+                <div style={{ ...styles.gradientCard, background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)" }}>
                   <Text style={{ fontSize: 14, opacity: 0.9, margin: "0 0 8px" }}>Outgoing Emails</Text>
                   <Text style={{ fontSize: 32, fontWeight: 700, margin: "0 0 4px" }}>{totalSent}</Text>
                   <Text style={{ fontSize: 12, opacity: 0.9, margin: 0 }}>{newThreads} new · {replies} replies</Text>
@@ -122,42 +253,42 @@ export default function RealTimeReportEmail({
           </Section>
 
           {/* Performance Metrics */}
-          <Section style={{ marginBottom: 32 }}>
-            <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Performance Metrics</Text>
-            <Row>
+          <Section style={styles.section}>
+            <Text style={styles.sectionTitle}>Performance Metrics</Text>
+            <Row style={{ alignItems: 'stretch' }}>
               <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0", height: '100%' }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Avg. Response Time</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: "0 0 4px", color: "#1a1a1a" }}>{avgResponseTime}</Text>
-                  <Text style={{ fontSize: 12, color: "#64748b", margin: 0 }}>{replies} replies</Text>
+                <div style={styles.card}>
+                  <Text style={styles.cardLabel}>Avg. Response Time</Text>
+                  <Text style={styles.cardValue}>{avgResponseTime}</Text>
+                  <Text style={styles.cardSubtext}>{replies} replies</Text>
                 </div>
               </Column>
               <Column style={{ padding: "0 8px", verticalAlign: 'top' }}>
-                <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0", height: '100%', textAlign: 'center' }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 16px" }}>Inbox Zero Stats</Text>
-                  <Text style={{ margin: '0', color: '#1a1a1a', fontSize: '36px', fontWeight: 'bold' }}>{inboxZeroWorkingDays}</Text>
-                  <Text style={{ margin: '5px 0 0 0', color: '#666666', fontSize: '14px' }}>Current Streak: {inboxZeroStreak} days</Text>
+                <div style={styles.card}>
+                  <Text style={styles.cardLabel}>Inbox Zero Days</Text>
+                  <Text style={styles.cardValue}>{inboxZeroWorkingDays}</Text>
+                  <Text style={styles.cardSubtext}>Current Streak: {inboxZeroStreak} days</Text>
                 </div>
               </Column>
             </Row>
           </Section>
 
           {/* Activity Hours */}
-          <Section style={{ marginBottom: 32 }}>
-            <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Activity Hours</Text>
+          <Section style={styles.section}>
+            <Text style={styles.sectionTitle}>Activity Hours</Text>
             <Row>
               <Column style={{ padding: "0 8px" }}>
-                <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Peak Activity</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>
+                <div style={styles.card}>
+                  <Text style={styles.cardLabel}>Peak Activity</Text>
+                  <Text style={styles.cardValue}>
                     {peakActivityHour !== undefined ? formatHour(peakActivityHour) : '--'}
                   </Text>
                 </div>
               </Column>
               <Column style={{ padding: "0 8px" }}>
-                <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                  <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 8px" }}>Busiest Hour</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 600, margin: 0, color: "#1a1a1a" }}>
+                <div style={styles.card}>
+                  <Text style={styles.cardLabel}>Busiest Hour</Text>
+                  <Text style={styles.cardValue}>
                     {busiestHour !== undefined ? formatHour(busiestHour) : '--'}
                   </Text>
                 </div>
@@ -167,12 +298,12 @@ export default function RealTimeReportEmail({
 
           {/* Top Contacts */}
           {(topSenders?.length || topRecipients?.length) && (
-            <Section style={{ marginBottom: 32 }}>
-              <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Top Contacts</Text>
+            <Section style={styles.section}>
+              <Text style={styles.sectionTitle}>Top Contacts</Text>
               <Row>
                 {topSenders?.length && (
                   <Column style={{ padding: "0 8px" }}>
-                    <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
+                    <div style={styles.card}>
                       <Text style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a1a1a" }}>Top Senders</Text>
                       {topSenders.map((sender, i) => (
                         <div key={i} style={{ marginBottom: i < topSenders.length - 1 ? 12 : 0 }}>
@@ -185,7 +316,7 @@ export default function RealTimeReportEmail({
                 )}
                 {topRecipients?.length && (
                   <Column style={{ padding: "0 8px" }}>
-                    <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
+                    <div style={styles.card}>
                       <Text style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a1a1a" }}>Top Recipients</Text>
                       {topRecipients.map((recipient, i) => (
                         <div key={i} style={{ marginBottom: i < topRecipients.length - 1 ? 12 : 0 }}>
@@ -202,21 +333,21 @@ export default function RealTimeReportEmail({
 
           {/* Response Time Distribution */}
           {responseTimeDistribution?.length && (
-            <Section style={{ marginBottom: 32 }}>
-              <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Response Time Distribution</Text>
-              <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <Section style={styles.section}>
+              <Text style={styles.sectionTitle}>Response Time Distribution</Text>
+              <div style={styles.card}>
+                <table style={styles.table}>
                   <thead>
                     <tr>
-                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Time Range</th>
-                      <th style={{ padding: "8px", textAlign: 'right', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Count</th>
+                      <th style={styles.tableHeader}>Time Range</th>
+                      <th style={styles.tableHeaderRight}>Count</th>
                     </tr>
                   </thead>
                   <tbody>
                     {responseTimeDistribution.map((item, i) => (
                       <tr key={i}>
-                        <td style={{ padding: "12px 8px", borderBottom: i < responseTimeDistribution.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{item.range}</td>
-                        <td style={{ padding: "12px 8px", textAlign: 'right', borderBottom: i < responseTimeDistribution.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{item.count}</td>
+                        <td style={{ ...styles.tableCell, borderBottom: i < responseTimeDistribution.length - 1 ? "1px solid #e2e8f0" : "none" }}>{item.range}</td>
+                        <td style={{ ...styles.tableCellRight, borderBottom: i < responseTimeDistribution.length - 1 ? "1px solid #e2e8f0" : "none" }}>{item.count}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -227,25 +358,25 @@ export default function RealTimeReportEmail({
 
           {/* Sent Emails & View Counts Section */}
           {sentEmailsWithViews && sentEmailsWithViews.length > 0 && (
-            <Section style={{ marginBottom: 32 }}>
-              <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Sent Emails & View Counts</Text>
-              <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <Section style={styles.section}>
+              <Text style={styles.sectionTitle}>Sent Emails & View Counts</Text>
+              <div style={styles.card}>
+                <table style={styles.table}>
                   <thead>
                     <tr>
-                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Name</th>
-                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Email</th>
-                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Subject</th>
-                      <th style={{ padding: "8px", textAlign: 'right', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Views</th>
+                      <th style={styles.tableHeader}>Name</th>
+                      <th style={styles.tableHeader}>Email</th>
+                      <th style={styles.tableHeader}>Subject</th>
+                      <th style={styles.tableHeaderRight}>Views</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sentEmailsWithViews.map((email, i) => (
                       <tr key={i}>
-                        <td style={{ padding: "12px 8px", borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.name}</td>
-                        <td style={{ padding: "12px 8px", borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.email}</td>
-                        <td style={{ padding: "12px 8px", borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.subject}</td>
-                        <td style={{ padding: "12px 8px", textAlign: 'right', borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{email.views}</td>
+                        <td style={{ ...styles.tableCell, borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none" }}>{email.name}</td>
+                        <td style={{ ...styles.tableCell, borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none" }}>{email.email}</td>
+                        <td style={{ ...styles.tableCell, borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none" }}>{email.subject}</td>
+                        <td style={{ ...styles.tableCellRight, borderBottom: i < sentEmailsWithViews.length - 1 ? "1px solid #e2e8f0" : "none" }}>{email.views}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -256,23 +387,23 @@ export default function RealTimeReportEmail({
 
           {/* Hourly Breakdown */}
           {hourlySent && hourlyReceived && (
-            <Section style={{ marginBottom: 32 }}>
-              <Text style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: "#1a1a1a" }}>Hourly Breakdown</Text>
-              <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <Section style={styles.section}>
+              <Text style={styles.sectionTitle}>Hourly Breakdown</Text>
+              <div style={styles.card}>
+                <table style={styles.table}>
                   <thead>
                     <tr>
-                      <th style={{ padding: "8px", textAlign: 'left', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Hour</th>
-                      <th style={{ padding: "8px", textAlign: 'right', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Sent</th>
-                      <th style={{ padding: "8px", textAlign: 'right', borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#64748b", fontWeight: 500 }}>Received</th>
+                      <th style={styles.tableHeader}>Hour</th>
+                      <th style={styles.tableHeaderRight}>Sent</th>
+                      <th style={styles.tableHeaderRight}>Received</th>
                     </tr>
                   </thead>
                   <tbody>
                     {hourlySent.map((sent, i) => (
                       <tr key={i}>
-                        <td style={{ padding: "12px 8px", borderBottom: i < hourlySent.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{formatHour(i)}</td>
-                        <td style={{ padding: "12px 8px", textAlign: 'right', borderBottom: i < hourlySent.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{sent}</td>
-                        <td style={{ padding: "12px 8px", textAlign: 'right', borderBottom: i < hourlySent.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 14, color: "#1a1a1a" }}>{hourlyReceived[i]}</td>
+                        <td style={{ ...styles.tableCell, borderBottom: i < hourlySent.length - 1 ? "1px solid #e2e8f0" : "none" }}>{formatHour(i)}</td>
+                        <td style={{ ...styles.tableCellRight, borderBottom: i < hourlySent.length - 1 ? "1px solid #e2e8f0" : "none" }}>{sent}</td>
+                        <td style={{ ...styles.tableCellRight, borderBottom: i < hourlySent.length - 1 ? "1px solid #e2e8f0" : "none" }}>{hourlyReceived[i]}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -282,21 +413,13 @@ export default function RealTimeReportEmail({
           )}
 
           {/* Footer */}
-          <Section style={{ textAlign: "center", marginTop: 32, paddingTop: 24, borderTop: "1px solid #e2e8f0" }}>
-            <Text style={{ fontSize: 14, color: "#64748b", margin: "0 0 16px" }}>
+          <Section style={styles.footer}>
+            <Text style={styles.footerText}>
               Sent by <strong style={{ color: "#1a1a1a" }}>Email KPI App</strong>
             </Text>
             <Button
               href="https://email-kpi.vercel.app"
-              style={{
-                background: "#2563eb",
-                color: "#fff",
-                padding: "12px 24px",
-                borderRadius: 8,
-                textDecoration: "none",
-                fontSize: 14,
-                fontWeight: 500,
-              }}
+              style={styles.button}
             >
               View Full Dashboard
             </Button>
