@@ -28,6 +28,7 @@ fastify.register(fastifyMultipart);
 fastify.register(cors, {
   origin: true,
   credentials: true,
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
 });
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
@@ -1177,6 +1178,35 @@ fastify.post('/api/gmail/mark-read', async (request, reply) => {
   } catch (err: any) {
     fastify.log.error(err);
     return reply.status(500).send({ error: err.message || 'Failed to mark message as read' });
+  }
+});
+
+// Endpoint to delete a Gmail message (move to trash)
+fastify.delete('/api/gmail/message', async (request, reply) => {
+  const { user_id, message_id } = request.body as { user_id?: string, message_id?: string };
+  if (!user_id || !message_id) {
+    return reply.status(400).send({ error: 'Missing user_id or message_id' });
+  }
+  try {
+    // 1. Get a valid access token
+    const accessToken = await getValidAccessToken(user_id);
+    // 2. Set up Gmail API client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // 3. Move the message to trash (add TRASH label, remove INBOX label)
+    await gmail.users.messages.modify({
+      userId: 'me',
+      id: message_id,
+      requestBody: {
+        addLabelIds: ['TRASH'],
+        removeLabelIds: ['INBOX'],
+      },
+    });
+    return reply.send({ success: true });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to move message to trash' });
   }
 });
 

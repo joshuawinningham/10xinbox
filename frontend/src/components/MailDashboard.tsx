@@ -7,6 +7,7 @@ import DOMPurify from 'dompurify';
 import { Card } from '@/components/ui/card';
 import { RichTextEditor } from './RichTextEditor';
 import type { Attachment } from './RichTextEditor';
+import { useToast } from '@/hooks/use-toast';
 
 const FOLDER_LABELS = [
   { name: "Inbox", label: "INBOX", icon: <Inbox className="h-4 w-4 mr-2" /> },
@@ -143,7 +144,9 @@ export default function MailDashboard() {
   const [pageTokens, setPageTokens] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [deletingEmailId, setDeletingEmailId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Array<{ name: string; email: string }>>([]);
+  const { toast } = useToast();
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
@@ -344,6 +347,44 @@ export default function MailDashboard() {
     window.dispatchEvent(new CustomEvent('refreshResponseTime'));
   };
 
+  // Handle email deletion (move to trash immediately)
+  const handleDeleteEmail = async (emailId: string) => {
+    if (!user || !emailId) return;
+    setDeletingEmailId(emailId);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/message`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, message_id: emailId })
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to move email to trash');
+      }
+      setEmails(prevEmails => prevEmails.filter(email => email.id !== emailId));
+      if (selectedEmailId === emailId) {
+        setSelectedEmailId(null);
+        setEmailBody('');
+      }
+      if (emails.length === 1 && hasMore) {
+        handleNextPage();
+      }
+      toast({
+        title: 'Email moved to trash',
+        description: 'You can recover it from the Trash folder in Gmail.',
+      });
+    } catch (err: any) {
+      console.error('Error moving email to trash:', err);
+      toast({
+        title: 'Failed to move email to trash',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingEmailId(null);
+    }
+  };
+
   return (
     <Card ref={cardRef} className="h-[90vh] rounded-lg shadow overflow-hidden border border-border flex relative hover:shadow-lg transition-shadow">
       <ResizablePanelGroup direction="horizontal" className="flex w-full h-full">
@@ -538,7 +579,21 @@ export default function MailDashboard() {
                       <span className={`truncate max-w-[240px] flex items-center ${isUnread ? 'font-semibold' : 'font-light text-muted-foreground'}`}> 
                         {getSenderName(email.sender)}
                       </span>
-                      <span className="text-xs text-muted-foreground">{formatEmailDate(email.date)}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{formatEmailDate(email.date)}</span>
+                        <button
+                          className="p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-colors"
+                          title="Move to trash"
+                          onClick={() => handleDeleteEmail(email.id)}
+                          disabled={deletingEmailId === email.id}
+                        >
+                          {deletingEmailId === email.id ? (
+                            <div className="w-4 h-4 border-2 border-destructive border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Trash2 className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <div className={`text-sm truncate ${isUnread ? 'font-semibold text-foreground' : 'font-light text-muted-foreground'}`}>{email.subject}</div>
                   </li>
@@ -614,6 +669,18 @@ export default function MailDashboard() {
                           <ReplyAll className="w-5 h-5" />
                         </button>
                       )}
+                      <button
+                        className="p-2 rounded hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        title="Move to trash"
+                        onClick={() => handleDeleteEmail(selectedEmail.id)}
+                        disabled={deletingEmailId === selectedEmail.id}
+                      >
+                        {deletingEmailId === selectedEmail.id ? (
+                          <div className="w-5 h-5 border-2 border-destructive border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Trash2 className="w-5 h-5" />
+                        )}
+                      </button>
                       <button className="p-2 rounded hover:bg-accent" title="More actions">
                         <MoreVertical className="w-5 h-5" />
                       </button>

@@ -14,6 +14,7 @@
 - 🔒 **Authentication:** Secure login and account management via Supabase.
 - 📧 **Gmail Integration:** Connect your Gmail for real-time analytics.
 - ✉️ **Email Client:** Read, send, and manage your emails directly in-app with a modern, responsive interface.
+- 🗑️ **Email Management:** Move emails to trash from both the inbox list and email detail view with confirmation dialogs.
 - 👁️ **Email Tracking:** See when recipients open your emails, with open counts, badges, and detailed open event history (including timestamps) via modals.
 
 ---
@@ -182,6 +183,9 @@ This project is licensed under the ISC License (see `backend/package.json`).
 - Full-featured in-app email client for reading, composing, and sending emails.
 - Modern UI with sidebar navigation, message list, and detailed message view.
 - Supports Gmail OAuth integration for secure access.
+- **Email Management:** Move emails to trash from both the inbox list and email detail view with confirmation dialogs.
+- **Email Actions:** Reply, reply all, and move to trash functionality with intuitive button placement.
+- **Real-time Updates:** Email list updates immediately after deletion, with automatic pagination handling.
 
 **Email Tracking:**
 - Track when and how many times each recipient opens your emails.
