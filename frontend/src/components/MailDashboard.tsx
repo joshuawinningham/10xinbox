@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./ui/resizable";
-import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical, Paperclip, Pencil, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Inbox, Send, FileText, AlertTriangle, Trash2, Archive, Reply, ReplyAll, MoreVertical, Paperclip, Pencil, ChevronRight, ChevronLeft, RotateCw } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSignature } from '@/hooks/useSignature';
 import DOMPurify from 'dompurify';
@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { RichTextEditor } from './RichTextEditor';
 import type { Attachment } from './RichTextEditor';
 import { useToast } from '@/hooks/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 
 const FOLDER_LABELS = [
   { name: "Inbox", label: "INBOX", icon: <Inbox className="h-4 w-4 mr-2" /> },
@@ -476,8 +477,35 @@ export default function MailDashboard() {
         <ResizablePanel defaultSize={28} minSize={18} maxSize={40} className="flex flex-col bg-card">
           <section className="h-full border-r border-gray-200 overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h3 className="text-md font-semibold">
+              <h3 className="text-md font-semibold flex items-center gap-2">
                 {FOLDER_LABELS.find(f => f.label === selectedFolder)?.name || selectedFolder}
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className={`ml-2 flex items-center justify-center w-7 h-7 rounded-full transition-colors
+                          ${loading ? 'bg-muted text-primary' : 'bg-transparent hover:bg-muted hover:text-primary'}`}
+                        aria-label="Refresh"
+                        onClick={async () => {
+                          setLoading(true);
+                          await fetchEmails(null, true);
+                          toast({ title: 'Inbox updated.' });
+                        }}
+                        disabled={loading}
+                        style={{ outline: 'none', border: 'none' }}
+                      >
+                        {loading ? (
+                          <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <RotateCw className="w-4 h-4 text-muted-foreground" strokeWidth={2.5} />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="center" className="text-xs">
+                      Refresh
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </h3>
               <div className="flex items-center gap-2">
                 <div className="flex bg-muted rounded-lg p-1 ml-2">
