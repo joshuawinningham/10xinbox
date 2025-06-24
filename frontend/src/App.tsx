@@ -18,6 +18,7 @@ import EmailTracking from '@/pages/EmailTracking';
 import './App.css';
 import { applyTheme } from '@/lib/theme-utils';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -147,10 +148,14 @@ function PrivateRoute({ children }: { children: JSX.Element }) {
 }
 
 function App() {
+  const { theme, loading } = useTheme();
+
   useEffect(() => {
-    const theme = localStorage.getItem('theme') || 'blue';
-    applyTheme(theme);
-  }, []);
+    if (!loading && theme) {
+      applyTheme(theme);
+      localStorage.setItem('theme', theme); // keep in sync
+    }
+  }, [theme, loading]);
 
   return (
     <Router>
