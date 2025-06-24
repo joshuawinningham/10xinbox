@@ -155,7 +155,7 @@ async function testInboxZeroCalculation(userId: string) {
     do {
       const res: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
         userId: 'me',
-        q: `label:INBOX after:${Math.floor(startOfDay.toSeconds())} before:${before}`,
+        q: `label:INBOX label:UNREAD after:${Math.floor(startOfDay.toSeconds())} before:${before}`,
         maxResults: 500,
         pageToken: nextPageToken
       });

@@ -18,10 +18,10 @@ const oauth2Client = new google.auth.OAuth2(
 
 async function updateInboxZeroData() {
   try {
-    // Get all users
+    // Get all users from user_settings
     const { data: users, error: usersError } = await supabase
-      .from('users')
-      .select('id, timezone');
+      .from('user_settings')
+      .select('user_id, time_zone');
 
     if (usersError) {
       throw usersError;
@@ -33,11 +33,11 @@ async function updateInboxZeroData() {
         const { data: tokenData, error: tokenError } = await supabase
           .from('gmail_tokens')
           .select('access_token, refresh_token, expires_at')
-          .eq('user_id', user.id)
+          .eq('user_id', user.user_id)
           .single();
 
         if (tokenError) {
-          logger.error(`Failed to fetch Gmail token for user ${user.id}:`, tokenError);
+          logger.error(`Failed to fetch Gmail token for user ${user.user_id}:`, tokenError);
           continue;
         }
 
@@ -45,11 +45,11 @@ async function updateInboxZeroData() {
         const { data: settingsData, error: settingsError } = await supabase
           .from('user_settings')
           .select('working_hours_start, working_hours_end, working_days, inbox_zero_buffer_minutes')
-          .eq('user_id', user.id)
+          .eq('user_id', user.user_id)
           .single();
 
         if (settingsError && settingsError.code !== 'PGRST116') { // PGRST116: No rows found
-          logger.error(`Failed to fetch user settings for user ${user.id}:`, settingsError);
+          logger.error(`Failed to fetch user settings for user ${user.user_id}:`, settingsError);
           continue;
         }
 
@@ -68,7 +68,7 @@ async function updateInboxZeroData() {
               access_token: credentials.access_token,
               expires_at: new Date(Date.now() + (credentials.expiry_date || 3600000))
             })
-            .eq('user_id', user.id);
+            .eq('user_id', user.user_id);
 
           tokenData.access_token = credentials.access_token;
         }
@@ -78,7 +78,7 @@ async function updateInboxZeroData() {
         oauth2Client.setCredentials({ access_token: tokenData.access_token });
 
         // Get user's timezone
-        const tz = user.timezone || 'UTC';
+        const tz = user.time_zone || 'UTC';
         const now = DateTime.now().setZone(tz);
         const startOfDay = now.startOf('day');
         const endOfDay = now.endOf('day');
@@ -92,7 +92,7 @@ async function updateInboxZeroData() {
 
         // Only update inbox zero data if today is a working day
         if (!isWorkingDay()) {
-          logger.info(`Skipping inbox zero update for user ${user.id} - not a working day`);
+          logger.info(`Skipping inbox zero update for user ${user.user_id} - not a working day`);
           continue;
         }
 
@@ -120,7 +120,7 @@ async function updateInboxZeroData() {
         do {
           const response: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
             userId: 'me',
-            q: `label:INBOX after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(queryEndTime.toSeconds())}`,
+            q: `label:INBOX label:UNREAD after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(queryEndTime.toSeconds())}`,
             maxResults: 500,
             pageToken: nextPageToken
           });
@@ -136,7 +136,7 @@ async function updateInboxZeroData() {
         const { error: upsertError } = await supabase
           .from('inbox_zero_days')
           .upsert({
-            user_id: user.id,
+            user_id: user.user_id,
             date: now.toISODate(),
             inbox_count: inboxCount
           }, {
@@ -144,11 +144,11 @@ async function updateInboxZeroData() {
           });
 
         if (upsertError) {
-          logger.error(`Failed to upsert inbox zero data for user ${user.id}:`, upsertError);
+          logger.error(`Failed to upsert inbox zero data for user ${user.user_id}:`, upsertError);
         }
 
       } catch (error) {
-        logger.error(`Error processing user ${user.id}:`, error);
+        logger.error(`Error processing user ${user.user_id}:`, error);
       }
     }
   } catch (error) {
