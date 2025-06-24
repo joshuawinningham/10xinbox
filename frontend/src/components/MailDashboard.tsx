@@ -36,7 +36,7 @@ function clearRecentSearches() {
 }
 
 function getSenderName(sender: string) {
-  // Match 'Name <email@domain.com>'
+  if (!sender) return '';
   const match = sender.match(/^(.*?)\s*<.*?>$/);
   if (match && match[1]) {
     return match[1].trim();
@@ -147,6 +147,7 @@ export default function MailDashboard() {
   const [deletingEmailId, setDeletingEmailId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Array<{ name: string; email: string }>>([]);
   const { toast } = useToast();
+  const removedEmailRef = useRef<{ [id: string]: Email }>({});
 
   // Collect unique senders from emails for contact autocomplete
   const uniqueSenders = Array.from(
@@ -352,6 +353,17 @@ export default function MailDashboard() {
     if (!user || !emailId) return;
     setDeletingEmailId(emailId);
     try {
+      // Store backup before removing
+      const toRemove = emails.find(e => e.id === emailId);
+      if (toRemove) removedEmailRef.current[emailId] = toRemove;
+      setEmails(prevEmails => prevEmails.filter(email => email.id !== emailId));
+      if (selectedEmailId === emailId) {
+        setSelectedEmailId(null);
+        setEmailBody('');
+      }
+      if (emails.length === 1 && hasMore) {
+        handleNextPage();
+      }
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/message`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -361,14 +373,6 @@ export default function MailDashboard() {
         const errorData = await res.json();
         throw new Error(errorData.error || 'Failed to move email to trash');
       }
-      setEmails(prevEmails => prevEmails.filter(email => email.id !== emailId));
-      if (selectedEmailId === emailId) {
-        setSelectedEmailId(null);
-        setEmailBody('');
-      }
-      if (emails.length === 1 && hasMore) {
-        handleNextPage();
-      }
       toast({
         title: 'Conversation moved to Trash.',
         action: (
@@ -376,7 +380,6 @@ export default function MailDashboard() {
             className="ml-2 underline text-blue-400 hover:text-blue-300 text-sm bg-transparent border-0 p-0"
             style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             onClick={async () => {
-              // Undo: move email back to inbox
               try {
                 const res = await fetch(`${import.meta.env.VITE_API_URL}/api/gmail/message/restore`, {
                   method: 'POST',
@@ -384,8 +387,13 @@ export default function MailDashboard() {
                   body: JSON.stringify({ user_id: user.id, message_id: emailId })
                 });
                 if (!res.ok) throw new Error('Failed to restore email');
-                // Optionally, refetch or optimistically restore
-                setEmails(prev => [{ ...prev.find(e => e.id === emailId)!, labelIds: ['INBOX'] }, ...prev]);
+                const removedEmail = removedEmailRef.current[emailId];
+                if (removedEmail) {
+                  setEmails(prev => [removedEmail, ...prev]);
+                  delete removedEmailRef.current[emailId];
+                } else {
+                  fetchEmails();
+                }
                 toast({ title: 'Conversation restored to Inbox.' });
               } catch (err) {
                 toast({ title: 'Failed to restore email', variant: 'destructive' });
