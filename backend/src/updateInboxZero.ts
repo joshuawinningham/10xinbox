@@ -96,39 +96,30 @@ async function updateInboxZeroData() {
           continue;
         }
 
-        // Calculate the buffer cutoff time
-        const bufferMinutes = settingsData?.inbox_zero_buffer_minutes || 30;
+        // Calculate the cutoff time (end of working hours)
         const workingHoursEnd = settingsData?.working_hours_end || '17:00:00';
         const [endHour, endMinute] = workingHoursEnd.split(':').map(Number);
-        const bufferCutoff = now.set({ hour: endHour, minute: endMinute }).minus({ minutes: bufferMinutes });
+        const cutoffTime = now.set({ hour: endHour, minute: endMinute, second: 0, millisecond: 0 });
 
-        // If it's before the buffer cutoff time, count all emails for the day
-        // If it's after the buffer cutoff time, only count emails received before the cutoff
-        let queryEndTime;
-        if (now < bufferCutoff) {
-          // Before buffer cutoff - count all emails for the day
-          queryEndTime = endOfDay;
-        } else {
-          // After buffer cutoff - only count emails before the cutoff
-          queryEndTime = bufferCutoff;
+        // If it's before the cutoff time, skip updating (user still has time to clear inbox)
+        if (now < cutoffTime) {
+          logger.info(`Skipping inbox zero update for user ${user.user_id} - before end of working hours`);
+          continue;
         }
 
-        // Fetch messages up to the calculated end time
+        // Fetch unread messages in INBOX up to the cutoff time
         let inboxCount = 0;
         let nextPageToken: string | undefined = undefined;
-        
         do {
           const response: GaxiosResponse<gmail_v1.Schema$ListMessagesResponse> = await gmail.users.messages.list({
             userId: 'me',
-            q: `label:INBOX label:UNREAD after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(queryEndTime.toSeconds())}`,
+            q: `label:INBOX label:UNREAD after:${Math.floor(startOfDay.toSeconds())} before:${Math.floor(cutoffTime.toSeconds())}`,
             maxResults: 500,
             pageToken: nextPageToken
           });
-          
           if (response.data.messages) {
             inboxCount += response.data.messages.length;
           }
-          
           nextPageToken = response.data.nextPageToken ?? undefined;
         } while (nextPageToken);
 
