@@ -11,6 +11,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTimeZone } from '@/hooks/useTimeZone';
 import { connectGmail } from '@/lib/gmail';
 import PageHeading from '@/components/PageHeading';
+import { useGmailConnection } from '@/hooks/useGmailConnection';
+import { useToast } from '@/hooks/use-toast';
 
 export default function Dashboard() {
   const [period, setPeriod] = useState<EmailStatsView>("hourly");
@@ -28,6 +30,9 @@ export default function Dashboard() {
   const [inboxZeroError, setInboxZeroError] = useState<string | null>(null);
   const [consecutiveInboxZero, setConsecutiveInboxZero] = useState<number | null>(null);
   const [showPermissionBanner, setShowPermissionBanner] = useState(true);
+  const { gmailConnected, loading: gmailLoading } = useGmailConnection(user?.id);
+  const { toast } = useToast();
+  const [gmailToastShown, setGmailToastShown] = useState(false);
 
   useEffect(() => {
     if (!user?.id || tzLoading || timeZone === 'UTC') {
@@ -178,6 +183,20 @@ export default function Dashboard() {
     };
     fetchConsecutiveInboxZero();
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!gmailLoading && user && !gmailConnected && !gmailToastShown) {
+      toast({
+        title: 'Gmail Connection Lost',
+        description: 'Your Gmail connection has expired or been disconnected. Please reconnect to continue tracking your email analytics.',
+        variant: 'destructive',
+        duration: 10000,
+      });
+      setGmailToastShown(true);
+    } else if (gmailConnected && gmailToastShown) {
+      setGmailToastShown(false);
+    }
+  }, [gmailConnected, gmailLoading, user, toast, gmailToastShown]);
 
   function formatDuration(seconds: number | null) {
     if (seconds == null) return '--';
