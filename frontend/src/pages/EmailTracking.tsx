@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, User, Cloud, Bot } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -175,11 +175,45 @@ export default function EmailTracking() {
                                   <div className="text-muted-foreground">No view events found.</div>
                                 ) : (
                                   <ul className="divide-y">
-                                    {openEvents.map((ev, i) => (
-                                      <li key={i} className="py-2">
-                                        <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
-                                      </li>
-                                    ))}
+                                    {openEvents.map((ev, i) => {
+                                      const ua = ev.user_agent || '';
+                                      const isGmailProxy = ua.includes('ggpht.com') || ua.includes('GoogleImageProxy') || ua.includes('via ggpht.com');
+                                      const isHuman = (ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
+                                                     ua.includes('Mozilla') && !isGmailProxy;
+                                      const isEmailClient = ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird');
+                                      
+                                      return (
+                                        <li key={i} className="py-2">
+                                          <div className="flex items-center gap-2">
+                                            <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
+                                            {isGmailProxy && (
+                                              <div className="flex items-center gap-1">
+                                                <Cloud className="w-3 h-3 text-blue-500" />
+                                                <span className="text-xs text-blue-600">Gmail Proxy</span>
+                                              </div>
+                                            )}
+                                            {isHuman && (
+                                              <div className="flex items-center gap-1">
+                                                <User className="w-3 h-3 text-green-500" />
+                                                <span className="text-xs text-green-600">Human</span>
+                                              </div>
+                                            )}
+                                            {isEmailClient && (
+                                              <div className="flex items-center gap-1">
+                                                <Bot className="w-3 h-3 text-purple-500" />
+                                                <span className="text-xs text-purple-600">Email Client</span>
+                                              </div>
+                                            )}
+                                            {!isGmailProxy && !isHuman && !isEmailClient && (
+                                              <div className="flex items-center gap-1">
+                                                <Bot className="w-3 h-3 text-gray-500" />
+                                                <span className="text-xs text-gray-600">Unknown</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </li>
+                                      );
+                                    })}
                                   </ul>
                                 )}
                               </>
@@ -220,11 +254,45 @@ export default function EmailTracking() {
                                   <div className="text-muted-foreground">No view events found.</div>
                                 ) : (
                                   <ul className="divide-y">
-                                    {openEvents.map((ev, i) => (
-                                      <li key={i} className="py-2">
-                                        <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
-                                      </li>
-                                    ))}
+                                    {openEvents.map((ev, i) => {
+                                      const ua = ev.user_agent || '';
+                                      const isGmailProxy = ua.includes('ggpht.com') || ua.includes('GoogleImageProxy') || ua.includes('via ggpht.com');
+                                      const isHuman = (ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
+                                                     ua.includes('Mozilla') && !isGmailProxy;
+                                      const isEmailClient = ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird');
+                                      
+                                      return (
+                                        <li key={i} className="py-2">
+                                          <div className="flex items-center gap-2">
+                                            <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
+                                            {isGmailProxy && (
+                                              <div className="flex items-center gap-1">
+                                                <Cloud className="w-3 h-3 text-blue-500" />
+                                                <span className="text-xs text-blue-600">Gmail Proxy</span>
+                                              </div>
+                                            )}
+                                            {isHuman && (
+                                              <div className="flex items-center gap-1">
+                                                <User className="w-3 h-3 text-green-500" />
+                                                <span className="text-xs text-green-600">Human</span>
+                                              </div>
+                                            )}
+                                            {isEmailClient && (
+                                              <div className="flex items-center gap-1">
+                                                <Bot className="w-3 h-3 text-purple-500" />
+                                                <span className="text-xs text-purple-600">Email Client</span>
+                                              </div>
+                                            )}
+                                            {!isGmailProxy && !isHuman && !isEmailClient && (
+                                              <div className="flex items-center gap-1">
+                                                <Bot className="w-3 h-3 text-gray-500" />
+                                                <span className="text-xs text-gray-600">Unknown</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </li>
+                                      );
+                                    })}
                                   </ul>
                                 )}
                               </>

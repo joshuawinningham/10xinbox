@@ -1692,46 +1692,108 @@ fastify.post('/api/email-tracking/analytics', async (request, reply) => {
     if (sentError) throw sentError;
     const totalSent = sentRows?.reduce((sum, row) => sum + (row.emails_sent || 0), 0) || 0;
 
-    // 2. Total opened emails (distinct email_id in email_opens)
+    // 2. Enhanced open analytics with Gmail proxy vs human detection
     const { data: openRows2, error: openError2 } = await supabase
       .from('email_opens')
-      .select('email_id')
+      .select('email_id, user_agent')
       .eq('user_id', user_id);
     if (openError2) throw openError2;
+    
     const openCounts: Record<string, number> = {};
+    const openTypeBreakdown = {
+      gmail_proxy: 0,
+      human: 0,
+      email_client: 0,
+      unknown: 0
+    };
+    
     openRows2?.forEach(row => {
       if (row.email_id) {
         openCounts[row.email_id] = (openCounts[row.email_id] || 0) + 1;
+        
+        // Categorize open type based on user agent
+        const ua = row.user_agent || '';
+        if (ua.includes('ggpht.com') || ua.includes('GoogleImageProxy')) {
+          openTypeBreakdown.gmail_proxy++;
+        } else if ((ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
+                  ua.includes('Mozilla') && !ua.includes('ggpht.com')) {
+          openTypeBreakdown.human++;
+        } else if (ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird')) {
+          openTypeBreakdown.email_client++;
+        } else {
+          openTypeBreakdown.unknown++;
+        }
       }
     });
+    
     let mostOpened = null;
     const sorted = Object.entries(openCounts).sort((a, b) => b[1] - a[1]);
     if (sorted.length > 0) {
       mostOpened = { email_id: sorted[0][0], count: sorted[0][1] };
     }
 
-    // 3. Open rate
-    const openRate = totalSent > 0 ? (Object.keys(openCounts).length / totalSent) * 100 : 0;
+    // 3. Open rate (unique emails opened vs total sent)
+    const uniqueEmailsOpened = Object.keys(openCounts).length;
+    const openRate = totalSent > 0 ? (uniqueEmailsOpened / totalSent) * 100 : 0;
+    
+    // Human engagement rate (emails with human opens vs total sent)
+    const { data: humanOpens, error: humanError } = await supabase
+      .from('email_opens')
+      .select('email_id, user_agent')
+      .eq('user_id', user_id);
+    if (humanError) throw humanError;
+    
+    const emailsWithHumanOpens = new Set();
+    humanOpens?.forEach(open => {
+      const ua = open.user_agent || '';
+      const isHuman = (ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
+                     ua.includes('Mozilla') && !ua.includes('ggpht.com');
+      if (isHuman && open.email_id) {
+        emailsWithHumanOpens.add(open.email_id);
+      }
+    });
+    
+    const humanEngagementRate = totalSent > 0 ? (emailsWithHumanOpens.size / totalSent) * 100 : 0;
 
-    // 4. Opens over time (last 30 days)
+    // 4. Opens over time (last 30 days) with type breakdown
     const { data: openEvents, error: openEventsError } = await supabase
       .from('email_opens')
-      .select('opened_at')
+      .select('opened_at, user_agent')
       .eq('user_id', user_id)
       .gte('opened_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
     if (openEventsError) throw openEventsError;
-    // Group by date
-    const opensByDate: Record<string, number> = {};
+    
+    // Group by date with type breakdown
+    const opensByDate: Record<string, { total: number; gmail_proxy: number; human: number; email_client: number }> = {};
     openEvents?.forEach(ev => {
       const date = ev.opened_at?.slice(0, 10); // YYYY-MM-DD
-      if (date) opensByDate[date] = (opensByDate[date] || 0) + 1;
+      if (date) {
+        if (!opensByDate[date]) {
+          opensByDate[date] = { total: 0, gmail_proxy: 0, human: 0, email_client: 0 };
+        }
+        opensByDate[date].total++;
+        
+        const ua = ev.user_agent || '';
+        if (ua.includes('ggpht.com') || ua.includes('GoogleImageProxy')) {
+          opensByDate[date].gmail_proxy++;
+        } else if ((ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
+                  ua.includes('Mozilla') && !ua.includes('ggpht.com')) {
+          opensByDate[date].human++;
+        } else if (ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird')) {
+          opensByDate[date].email_client++;
+        }
+      }
     });
-    const opensOverTime = Object.entries(opensByDate).map(([date, count]) => ({ date, count }));
+    const opensOverTime = Object.entries(opensByDate).map(([date, counts]) => ({ date, ...counts }));
 
     return reply.send({
       totalSent,
-      totalOpened: Object.keys(openCounts).length,
-      openRate,
+      totalOpened: uniqueEmailsOpened,
+      totalOpenEvents: openRows2?.length || 0,
+      openRate: Math.round(openRate * 100) / 100,
+      humanEngagementRate: Math.round(humanEngagementRate * 100) / 100,
+      emailsWithHumanOpens: emailsWithHumanOpens.size,
+      openTypeBreakdown,
       mostOpened,
       opensOverTime,
     });
@@ -1837,13 +1899,27 @@ fastify.get('/track/open', async (request, reply) => {
     /security scan/i
   ];
 
-  // Allow Gmail's image proxy and other email clients
-  const isGmailProxy = userAgent.includes('ggpht.com GoogleImageProxy');
-  const isEmailClient = userAgent.includes('Gmail') || 
-                       userAgent.includes('Outlook') || 
+  // Enhanced Gmail proxy and human detection
+  const isGmailProxy = userAgent.includes('ggpht.com GoogleImageProxy') || 
+                      userAgent.includes('GoogleImageProxy') ||
+                      (userAgent.includes('Mozilla/5.0 (Windows NT 5.1') && userAgent.includes('ggpht.com'));
+  
+  const isHumanBrowser = (userAgent.includes('Chrome') || userAgent.includes('Firefox') || userAgent.includes('Safari')) &&
+                        (userAgent.includes('Mozilla') && !userAgent.includes('ggpht.com'));
+  
+  const isEmailClient = userAgent.includes('Outlook') || 
                        userAgent.includes('Apple-Mail') ||
                        userAgent.includes('Thunderbird');
-  const isBot = !isGmailProxy && !isEmailClient && botPatterns.some(pattern => pattern.test(userAgent));
+  
+  const isBot = !isGmailProxy && !isHumanBrowser && !isEmailClient && 
+                botPatterns.some(pattern => pattern.test(userAgent));
+
+  // Determine open type for analytics
+  let openType = 'unknown';
+  if (isGmailProxy) openType = 'gmail_proxy';
+  else if (isHumanBrowser) openType = 'human';
+  else if (isEmailClient) openType = 'email_client';
+  else if (isBot) openType = 'bot';
 
   if (isBot) {
     fastify.log.info({
@@ -1851,8 +1927,7 @@ fastify.get('/track/open', async (request, reply) => {
       requestId,
       email_id,
       userAgent,
-      isGmailProxy,
-      isEmailClient
+      openType
     });
     reply.header('Content-Type', 'image/gif');
     return Buffer.from(
@@ -1862,13 +1937,27 @@ fastify.get('/track/open', async (request, reply) => {
   }
 
   try {
-    // Log the open event in Supabase
-    const { data, error } = await supabase.from('email_opens').insert({
+    // Log the open event in Supabase with enhanced detection
+    const insertData = {
       email_id,
-      user_id: user_id || null, // Make user_id optional
+      user_id: user_id || null,
       opened_at: new Date().toISOString(),
       user_agent: userAgent
-    });
+    };
+    
+    // Try with open_type first, fallback gracefully
+    let insertResult;
+    try {
+      insertResult = await supabase.from('email_opens').insert({
+        ...insertData,
+        open_type: openType
+      });
+    } catch (insertError) {
+      // Fallback without open_type column
+      insertResult = await supabase.from('email_opens').insert(insertData);
+    }
+    
+    const { data, error } = insertResult;
     
     if (error) {
       fastify.log.error({
@@ -1884,8 +1973,7 @@ fastify.get('/track/open', async (request, reply) => {
         requestId,
         email_id,
         data,
-        isGmailProxy,
-        isEmailClient,
+        openType,
         cfIp: request.headers['cf-connecting-ip']
       });
     }
