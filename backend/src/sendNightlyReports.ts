@@ -279,7 +279,7 @@ async function main() {
         const oauth2Client = new google.auth.OAuth2(
           process.env.GOOGLE_CLIENT_ID,
           process.env.GOOGLE_CLIENT_SECRET,
-          process.env.GOOGLE_REDIRECT_URI
+          `${process.env.BASE_URL || 'http://localhost:3001'}/api/auth/google/callback`
         );
 
         // Check if token needs refresh

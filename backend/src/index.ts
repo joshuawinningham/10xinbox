@@ -16,7 +16,7 @@ import RealTimeReportEmail from "../emails/RealTimeReportEmail";
 import { sendEmail } from './email';
 import fastifyMultipart from '@fastify/multipart';
 import { calculateResponseTime } from './updateResponseTimeCache';
-import { getValidAccessToken } from './utils/gmail';
+import { getValidAccessToken, refreshTokenIfNeeded } from './utils/gmail';
 import { OAuth2Client } from 'google-auth-library';
 
 dotenv.config({ path: '.env.local' });
@@ -85,7 +85,7 @@ fastify.get('/api/auth/google', async (request, reply) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
-    prompt: 'consent',
+    prompt: 'consent', // Always request consent to ensure refresh token
     state: user_id,
   });
   reply.redirect(url);
@@ -95,15 +95,30 @@ fastify.get('/api/auth/google', async (request, reply) => {
 fastify.get('/api/auth/google/callback', async (request, reply) => {
   const { code, state } = request.query as { code?: string; state?: string };
   if (!code || !state) {
+    fastify.log.error('OAuth callback missing code or state');
     return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
   }
   try {
     const { tokens } = await oauth2Client.getToken(code);
 
+    // Validate that we received the required tokens
+    if (!tokens.access_token || !tokens.refresh_token) {
+      fastify.log.error('OAuth callback missing required tokens', { 
+        hasAccessToken: !!tokens.access_token, 
+        hasRefreshToken: !!tokens.refresh_token 
+      });
+      return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
+    }
+
     // Decode the id_token to get the user's email and name
     const decoded: any = jwt.decode(tokens.id_token as string);
     const email = decoded?.email;
     const name = decoded?.name || decoded?.given_name || '';
+
+    if (!email) {
+      fastify.log.error('OAuth callback missing email from id_token');
+      return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
+    }
 
     // Store tokens in Supabase using the user_id (UUID) from state
     const { error } = await supabase
@@ -114,17 +129,19 @@ fastify.get('/api/auth/google/callback', async (request, reply) => {
         name, // Store the name
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
-        expires_at: new Date(Date.now() + (tokens.expiry_date ? tokens.expiry_date - Date.now() : 0)).toISOString(),
+        expires_at: new Date(Date.now() + (tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600000)).toISOString(),
         created_at: new Date().toISOString(),
       });
 
     if (error) {
+      fastify.log.error('Failed to store tokens in database:', error);
       return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
     }
 
+    fastify.log.info('Successfully connected Gmail for user', { user_id: state, email });
     return reply.redirect(`${FRONTEND_URL}/?gmail_connected=1`);
   } catch (err) {
-    fastify.log.error(err);
+    fastify.log.error('OAuth callback error:', err);
     return reply.redirect(`${FRONTEND_URL}/?gmail_error=1`);
   }
 });
@@ -141,6 +158,21 @@ fastify.get('/api/gmail/test-token', async (request, reply) => {
   } catch (err: any) {
     fastify.log.error(err);
     return reply.status(500).send({ error: err.message || 'Failed to get access token' });
+  }
+});
+
+// Proactive token refresh endpoint - can be called periodically to prevent expirations
+fastify.post('/api/gmail/refresh-token', async (request, reply) => {
+  const { user_id } = request.body as { user_id?: string };
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Missing user_id' });
+  }
+  try {
+    const success = await refreshTokenIfNeeded(user_id);
+    return reply.send({ success });
+  } catch (err: any) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: err.message || 'Failed to refresh token' });
   }
 });
 
@@ -258,6 +290,31 @@ cron.schedule('0 1 * * *', async () => {
     }
   } catch (err) {
     fastify.log.error('Cron job error:', err);
+  }
+});
+
+// Cron job: proactively refresh tokens for all users every 30 minutes
+cron.schedule('*/30 * * * *', async () => {
+  try {
+    const { data: users, error } = await supabase.from('gmail_tokens').select('user_id');
+    if (error) {
+      fastify.log.error('Failed to fetch users for token refresh cron job:', error);
+      return;
+    }
+    for (const user of users) {
+      try {
+        const success = await refreshTokenIfNeeded(user.user_id);
+        if (success) {
+          fastify.log.info(`Proactively refreshed token for user ${user.user_id}`);
+        } else {
+          fastify.log.warn(`Failed to refresh token for user ${user.user_id}`);
+        }
+      } catch (err) {
+        fastify.log.error(`Token refresh failed for user ${user.user_id}:`, err);
+      }
+    }
+  } catch (err) {
+    fastify.log.error('Token refresh cron job error:', err);
   }
 });
 

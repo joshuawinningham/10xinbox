@@ -20,11 +20,39 @@ export function useGmailConnection(userId: string | undefined) {
       .finally(() => setLoading(false));
   }, [userId]);
 
+  const refreshToken = useCallback(() => {
+    if (!userId) return;
+    // Proactively refresh token to prevent disconnections
+    fetch(`${import.meta.env.VITE_API_URL}/api/gmail/refresh-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          console.log('Token refreshed successfully');
+        }
+      })
+      .catch(err => {
+        console.error('Failed to refresh token:', err);
+      });
+  }, [userId]);
+
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 30000); // Poll every 30 seconds
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+    
+    // Poll connection status every 30 seconds
+    const statusInterval = setInterval(fetchStatus, 30000);
+    
+    // Proactively refresh token every 15 minutes to prevent expirations
+    const refreshInterval = setInterval(refreshToken, 15 * 60 * 1000);
+    
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(refreshInterval);
+    };
+  }, [fetchStatus, refreshToken]);
 
   return { gmailConnected, setGmailConnected, loading, error, refresh: fetchStatus };
 } 
