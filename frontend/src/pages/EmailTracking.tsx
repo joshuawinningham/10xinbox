@@ -8,6 +8,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 
 export default function EmailTracking() {
   const { user, loading: authLoading } = useAuth();
+  // Enhanced Gmail proxy vs human detection
   // New state for sent emails and open events
   const [sentEmails, setSentEmails] = useState<any[]>([]);
   const [sentLoading, setSentLoading] = useState(true);
