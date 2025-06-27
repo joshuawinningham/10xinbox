@@ -176,40 +176,74 @@ export default function EmailTracking() {
                                 ) : (
                                   <ul className="divide-y">
                                     {openEvents.map((ev, i) => {
+                                      // Use stored open_type if available, otherwise fall back to user agent detection
+                                      const storedType = ev.open_type;
                                       const ua = ev.user_agent || '';
-                                      const isGmailProxy = ua.includes('ggpht.com') || ua.includes('GoogleImageProxy') || ua.includes('via ggpht.com');
-                                      const isHuman = (ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
-                                                     ua.includes('Mozilla') && !isGmailProxy;
-                                      const isEmailClient = ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird');
+                                      
+                                      let icon, color, label;
+                                      
+                                      if (storedType) {
+                                        // Use backend classification
+                                        switch (storedType) {
+                                          case 'gmail_human':
+                                            icon = <User className="w-3 h-3 text-green-500" />;
+                                            color = 'text-green-600';
+                                            label = 'Gmail Human';
+                                            break;
+                                          case 'gmail_proxy':
+                                            icon = <Cloud className="w-3 h-3 text-blue-500" />;
+                                            color = 'text-blue-600';
+                                            label = 'Gmail Proxy';
+                                            break;
+                                          case 'human':
+                                            icon = <User className="w-3 h-3 text-green-500" />;
+                                            color = 'text-green-600';
+                                            label = 'Human';
+                                            break;
+                                          case 'email_client':
+                                            icon = <Bot className="w-3 h-3 text-purple-500" />;
+                                            color = 'text-purple-600';
+                                            label = 'Email Client';
+                                            break;
+                                          default:
+                                            icon = <Bot className="w-3 h-3 text-gray-500" />;
+                                            color = 'text-gray-600';
+                                            label = 'Unknown';
+                                        }
+                                      } else {
+                                        // Fallback to user agent detection for old records
+                                        const isGmailProxy = ua.includes('ggpht.com') || ua.includes('GoogleImageProxy') || ua.includes('via ggpht.com');
+                                        const isHuman = (ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
+                                                       ua.includes('Mozilla') && !isGmailProxy;
+                                        const isEmailClient = ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird');
+                                        
+                                        if (isGmailProxy) {
+                                          icon = <Cloud className="w-3 h-3 text-blue-500" />;
+                                          color = 'text-blue-600';
+                                          label = 'Gmail Proxy';
+                                        } else if (isHuman) {
+                                          icon = <User className="w-3 h-3 text-green-500" />;
+                                          color = 'text-green-600';
+                                          label = 'Human';
+                                        } else if (isEmailClient) {
+                                          icon = <Bot className="w-3 h-3 text-purple-500" />;
+                                          color = 'text-purple-600';
+                                          label = 'Email Client';
+                                        } else {
+                                          icon = <Bot className="w-3 h-3 text-gray-500" />;
+                                          color = 'text-gray-600';
+                                          label = 'Unknown';
+                                        }
+                                      }
                                       
                                       return (
                                         <li key={i} className="py-2">
                                           <div className="flex items-center gap-2">
                                             <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
-                                            {isGmailProxy && (
-                                              <div className="flex items-center gap-1">
-                                                <Cloud className="w-3 h-3 text-blue-500" />
-                                                <span className="text-xs text-blue-600">Gmail Proxy</span>
-                                              </div>
-                                            )}
-                                            {isHuman && (
-                                              <div className="flex items-center gap-1">
-                                                <User className="w-3 h-3 text-green-500" />
-                                                <span className="text-xs text-green-600">Human</span>
-                                              </div>
-                                            )}
-                                            {isEmailClient && (
-                                              <div className="flex items-center gap-1">
-                                                <Bot className="w-3 h-3 text-purple-500" />
-                                                <span className="text-xs text-purple-600">Email Client</span>
-                                              </div>
-                                            )}
-                                            {!isGmailProxy && !isHuman && !isEmailClient && (
-                                              <div className="flex items-center gap-1">
-                                                <Bot className="w-3 h-3 text-gray-500" />
-                                                <span className="text-xs text-gray-600">Unknown</span>
-                                              </div>
-                                            )}
+                                            <div className="flex items-center gap-1">
+                                              {icon}
+                                              <span className={`text-xs ${color}`}>{label}</span>
+                                            </div>
                                           </div>
                                         </li>
                                       );
@@ -255,40 +289,74 @@ export default function EmailTracking() {
                                 ) : (
                                   <ul className="divide-y">
                                     {openEvents.map((ev, i) => {
+                                      // Use stored open_type if available, otherwise fall back to user agent detection
+                                      const storedType = ev.open_type;
                                       const ua = ev.user_agent || '';
-                                      const isGmailProxy = ua.includes('ggpht.com') || ua.includes('GoogleImageProxy') || ua.includes('via ggpht.com');
-                                      const isHuman = (ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
-                                                     ua.includes('Mozilla') && !isGmailProxy;
-                                      const isEmailClient = ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird');
+                                      
+                                      let icon, color, label;
+                                      
+                                      if (storedType) {
+                                        // Use backend classification
+                                        switch (storedType) {
+                                          case 'gmail_human':
+                                            icon = <User className="w-3 h-3 text-green-500" />;
+                                            color = 'text-green-600';
+                                            label = 'Gmail Human';
+                                            break;
+                                          case 'gmail_proxy':
+                                            icon = <Cloud className="w-3 h-3 text-blue-500" />;
+                                            color = 'text-blue-600';
+                                            label = 'Gmail Proxy';
+                                            break;
+                                          case 'human':
+                                            icon = <User className="w-3 h-3 text-green-500" />;
+                                            color = 'text-green-600';
+                                            label = 'Human';
+                                            break;
+                                          case 'email_client':
+                                            icon = <Bot className="w-3 h-3 text-purple-500" />;
+                                            color = 'text-purple-600';
+                                            label = 'Email Client';
+                                            break;
+                                          default:
+                                            icon = <Bot className="w-3 h-3 text-gray-500" />;
+                                            color = 'text-gray-600';
+                                            label = 'Unknown';
+                                        }
+                                      } else {
+                                        // Fallback to user agent detection for old records
+                                        const isGmailProxy = ua.includes('ggpht.com') || ua.includes('GoogleImageProxy') || ua.includes('via ggpht.com');
+                                        const isHuman = (ua.includes('Chrome') || ua.includes('Firefox') || ua.includes('Safari')) && 
+                                                       ua.includes('Mozilla') && !isGmailProxy;
+                                        const isEmailClient = ua.includes('Outlook') || ua.includes('Apple-Mail') || ua.includes('Thunderbird');
+                                        
+                                        if (isGmailProxy) {
+                                          icon = <Cloud className="w-3 h-3 text-blue-500" />;
+                                          color = 'text-blue-600';
+                                          label = 'Gmail Proxy';
+                                        } else if (isHuman) {
+                                          icon = <User className="w-3 h-3 text-green-500" />;
+                                          color = 'text-green-600';
+                                          label = 'Human';
+                                        } else if (isEmailClient) {
+                                          icon = <Bot className="w-3 h-3 text-purple-500" />;
+                                          color = 'text-purple-600';
+                                          label = 'Email Client';
+                                        } else {
+                                          icon = <Bot className="w-3 h-3 text-gray-500" />;
+                                          color = 'text-gray-600';
+                                          label = 'Unknown';
+                                        }
+                                      }
                                       
                                       return (
                                         <li key={i} className="py-2">
                                           <div className="flex items-center gap-2">
                                             <div className="font-mono text-xs">{new Date(ev.opened_at).toLocaleString()}</div>
-                                            {isGmailProxy && (
-                                              <div className="flex items-center gap-1">
-                                                <Cloud className="w-3 h-3 text-blue-500" />
-                                                <span className="text-xs text-blue-600">Gmail Proxy</span>
-                                              </div>
-                                            )}
-                                            {isHuman && (
-                                              <div className="flex items-center gap-1">
-                                                <User className="w-3 h-3 text-green-500" />
-                                                <span className="text-xs text-green-600">Human</span>
-                                              </div>
-                                            )}
-                                            {isEmailClient && (
-                                              <div className="flex items-center gap-1">
-                                                <Bot className="w-3 h-3 text-purple-500" />
-                                                <span className="text-xs text-purple-600">Email Client</span>
-                                              </div>
-                                            )}
-                                            {!isGmailProxy && !isHuman && !isEmailClient && (
-                                              <div className="flex items-center gap-1">
-                                                <Bot className="w-3 h-3 text-gray-500" />
-                                                <span className="text-xs text-gray-600">Unknown</span>
-                                              </div>
-                                            )}
+                                            <div className="flex items-center gap-1">
+                                              {icon}
+                                              <span className={`text-xs ${color}`}>{label}</span>
+                                            </div>
                                           </div>
                                         </li>
                                       );

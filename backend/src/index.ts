@@ -1899,7 +1899,7 @@ fastify.get('/track/open', async (request, reply) => {
     /security scan/i
   ];
 
-  // Enhanced Gmail proxy and human detection
+  // Enhanced Gmail proxy and human detection with additional heuristics
   const isGmailProxy = userAgent.includes('ggpht.com GoogleImageProxy') || 
                       userAgent.includes('GoogleImageProxy') ||
                       (userAgent.includes('Mozilla/5.0 (Windows NT 5.1') && userAgent.includes('ggpht.com'));
@@ -1914,12 +1914,64 @@ fastify.get('/track/open', async (request, reply) => {
   const isBot = !isGmailProxy && !isHumanBrowser && !isEmailClient && 
                 botPatterns.some(pattern => pattern.test(userAgent));
 
-  // Determine open type for analytics
+  // Advanced heuristics for Gmail proxy classification
   let openType = 'unknown';
-  if (isGmailProxy) openType = 'gmail_proxy';
-  else if (isHumanBrowser) openType = 'human';
-  else if (isEmailClient) openType = 'email_client';
-  else if (isBot) openType = 'bot';
+  
+  if (isGmailProxy) {
+    // Check timing heuristics for Gmail proxy vs human-triggered proxy
+    try {
+      // Get recent opens for this email to analyze timing patterns
+      const { data: recentOpens, error: recentError } = await supabase
+        .from('email_opens')
+        .select('opened_at, user_agent')
+        .eq('email_id', email_id)
+        .order('opened_at', { ascending: false })
+        .limit(5);
+      
+      if (!recentError && recentOpens) {
+        const now = new Date();
+        const recentGmailOpens = recentOpens.filter(open => 
+          (open.user_agent || '').includes('ggpht.com') || 
+          (open.user_agent || '').includes('GoogleImageProxy')
+        );
+        
+        // Heuristics to detect human-triggered Gmail proxy opens:
+        // 1. Multiple rapid opens within 5 minutes (likely testing/manual)
+        // 2. Opens outside of typical automated timing (not immediately after send)
+        // 3. Presence of other request headers that indicate human interaction
+        
+        const rapidOpens = recentGmailOpens.filter(open => {
+          const openTime = new Date(open.opened_at);
+          return (now.getTime() - openTime.getTime()) < 5 * 60 * 1000; // 5 minutes
+        }).length;
+        
+        const hasReferrer = request.headers.referer && request.headers.referer.includes('mail.google.com');
+        const hasRealUserIP = request.headers['cf-connecting-ip'] || request.ip;
+        const isFromMailClient = request.headers.referer && (
+          request.headers.referer.includes('mail.google.com') ||
+          request.headers.referer.includes('gmail.com')
+        );
+        
+        // If multiple rapid opens, likely human interaction through Gmail
+        if (rapidOpens >= 2 || hasReferrer || isFromMailClient) {
+          openType = 'gmail_human'; // Human action through Gmail proxy
+        } else {
+          openType = 'gmail_proxy'; // Automated Gmail prefetch
+        }
+      } else {
+        openType = 'gmail_proxy'; // Default for Gmail proxy
+      }
+    } catch (err) {
+      // Fallback if database check fails
+      openType = 'gmail_proxy';
+    }
+  } else if (isHumanBrowser) {
+    openType = 'human';
+  } else if (isEmailClient) {
+    openType = 'email_client';
+  } else if (isBot) {
+    openType = 'bot';
+  }
 
   if (isBot) {
     fastify.log.info({
