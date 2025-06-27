@@ -29,3 +29,6 @@ dist/
 build/
 frontend/dist/
 backend/dist/
+
+# Claude Code configuration
+CLAUDE.md

@@ -10,7 +10,8 @@
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
     "preview-emails": "ts-node src/preview-emails.ts",
     "update-inbox-zero": "ts-node src/updateInboxZero.ts",
-    "debug-metrics": "ts-node src/debug-metrics.ts"
+    "debug-metrics": "ts-node src/debug-metrics.ts",
+    "refresh-tokens": "ts-node src/refreshTokens.ts"
   },
   "keywords": [],
   "author": "",

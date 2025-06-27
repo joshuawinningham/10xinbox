@@ -125,32 +125,6 @@ npm run dev     # Start Vite dev server (default: http://localhost:5173)
    - `PORT` (optional, Render sets this automatically)
 6. Deploy!
 
-### Nightly Email Report Cron Job (Render)
-You can automate nightly (or hourly) email KPI reports using a Render Cron Job:
-
-1. In your Render dashboard, click **New > Cron Job**.
-2. Connect your repo and set the root directory to `backend`.
-3. **Build command:**
-   ```sh
-   npm install && npm run build
-   ```
-4. **Start command (command to run periodically):**
-   ```sh
-   node dist/src/sendNightlyReports.js
-   ```
-5. **Schedule:**
-   - For hourly: `0 * * * *`
-   - For nightly at 1am UTC: `0 1 * * *`
-   - For testing (every 5 min): `*/5 * * * *`
-6. **Environment variables:** Add the same variables as your backend web service:
-   - `GOOGLE_CLIENT_ID`
-   - `GOOGLE_CLIENT_SECRET`
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_KEY`
-   - `RESEND_API_KEY`
-   - `BASE_URL` (should match your backend URL)
-7. Deploy the cron job. Check logs after the first run to confirm reports are being sent.
-
 ---
 
 ## Build & Lint Commands
