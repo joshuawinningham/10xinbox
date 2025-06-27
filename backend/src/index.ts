@@ -1822,7 +1822,7 @@ fastify.post('/api/email-tracking/open-events', async (request, reply) => {
   if (!user_id || !email_id) return reply.status(400).send({ error: 'Missing user_id or email_id' });
   const { data, error } = await supabase
     .from('email_opens')
-    .select('opened_at, user_agent')
+    .select('opened_at, user_agent, open_type')
     .eq('user_id', user_id)
     .eq('email_id', email_id)
     .order('opened_at', { ascending: true });
