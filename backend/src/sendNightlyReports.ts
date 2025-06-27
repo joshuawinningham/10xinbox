@@ -94,6 +94,15 @@ async function main() {
         throw new Error('Failed to generate today\'s date string');
       }
 
+      logger.info('Date calculation for user', {
+        userId: user.user_id,
+        timezone: tz,
+        now: now.toISO(),
+        yesterday: yesterday.toISO(),
+        yesterdayDateStr,
+        todayDateStr
+      });
+
       // Check if report already sent for this user/date
       const { data: sentRow, error: sentError } = await supabase
         .from('reports_sent')
@@ -111,8 +120,8 @@ async function main() {
         .from('sent_emails')
         .select('email_id, user_id, sent_at, to_email, to_name, subject, body, is_reply')
         .eq('user_id', user.user_id)
-        .gte('sent_at', yesterdayDateStr)
-        .lt('sent_at', todayDateStr)
+        .gte('sent_at', `${yesterdayDateStr}T00:00:00`)
+        .lt('sent_at', `${todayDateStr}T00:00:00`)
         .order('sent_at', { ascending: true });
 
       if (emailsError) {
@@ -122,6 +131,36 @@ async function main() {
 
       // Type assertion since we know the shape of the data
       const typedEmails = (emails || []) as SentEmail[];
+
+      logger.info(`Found ${typedEmails.length} emails for user ${user.user_id}`, {
+        userId: user.user_id,
+        yesterdayDateStr,
+        todayDateStr,
+        dateRange: `${yesterdayDateStr}T00:00:00 to ${todayDateStr}T00:00:00`
+      });
+
+      // Debug: Check if there are any emails at all for this user
+      if (typedEmails.length === 0) {
+        const { data: allEmails, error: allEmailsError } = await supabase
+          .from('sent_emails')
+          .select('email_id, sent_at')
+          .eq('user_id', user.user_id)
+          .order('sent_at', { ascending: false })
+          .limit(5);
+        
+        if (!allEmailsError && allEmails && allEmails.length > 0) {
+          logger.info('Found emails in database but not in date range', {
+            userId: user.user_id,
+            sampleEmails: allEmails.map(e => ({ email_id: e.email_id, sent_at: e.sent_at })),
+            dateRange: `${yesterdayDateStr}T00:00:00 to ${todayDateStr}T00:00:00`
+          });
+        } else {
+          logger.info('No emails found in database at all for user', {
+            userId: user.user_id,
+            error: allEmailsError
+          });
+        }
+      }
 
       // Get emails_received from email_stats for the previous day
       let emailsReceived = 0;

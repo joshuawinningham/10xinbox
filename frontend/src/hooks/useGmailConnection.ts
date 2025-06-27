@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export function useGmailConnection(userId: string | undefined) {
   const [gmailConnected, setGmailConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchStatus = useCallback(() => {
     if (!userId) return;
     setLoading(true);
     setError(null);
@@ -20,5 +20,11 @@ export function useGmailConnection(userId: string | undefined) {
       .finally(() => setLoading(false));
   }, [userId]);
 
-  return { gmailConnected, setGmailConnected, loading, error };
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000); // Poll every 30 seconds
+    return () => clearInterval(interval);
+  }, [fetchStatus]);
+
+  return { gmailConnected, setGmailConnected, loading, error, refresh: fetchStatus };
 } 

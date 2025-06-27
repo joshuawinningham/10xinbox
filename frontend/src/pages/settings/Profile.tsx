@@ -44,7 +44,7 @@ const timezones = [
 
 export default function SettingsProfile() {
   const { user } = useAuth();
-  const { gmailConnected, setGmailConnected, loading: gmailLoading } = useGmailConnection(user?.id);
+  const { gmailConnected, setGmailConnected, loading: gmailLoading, refresh } = useGmailConnection(user?.id);
   const { timeZone, setTimeZone, loading: tzLoading, error: tzError, updateTimeZone } = useTimeZone();
   const { signature: savedSignature, loading: signatureLoading, error: signatureError, updateSignature } = useSignature();
   const { theme, error: themeError, updateTheme } = useTheme();
@@ -132,7 +132,7 @@ export default function SettingsProfile() {
                 onClick={async () => {
                   if (user) {
                     await disconnectGmail(user.id);
-                    setGmailConnected(false);
+                    if (typeof refresh === 'function') refresh();
                   }
                 }}
                 disabled={gmailLoading || !user}

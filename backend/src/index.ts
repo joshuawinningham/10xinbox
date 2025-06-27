@@ -220,6 +220,10 @@ fastify.post('/api/gmail/fetch-stats', async (request, reply) => {
     });
   } catch (err: any) {
     fastify.log.error(err);
+    // Check for authentication errors
+    if (err.status === 401 || err.code === 401 || err.message?.includes('Invalid Credentials')) {
+      return reply.status(401).send({ error: 'gmail_auth_expired' });
+    }
     // Check for insufficient permissions error from Google
     if (err && err.errors && Array.isArray(err.errors)) {
       const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
@@ -680,6 +684,10 @@ fastify.post('/api/gmail/hourly-stats', async (request, reply) => {
     return reply.send({ sent: sentByHour, received: receivedByHour });
   } catch (err: any) {
     fastify.log.error(err);
+    // Check for authentication errors
+    if (err.status === 401 || err.code === 401 || err.message?.includes('Invalid Credentials')) {
+      return reply.status(401).send({ error: 'gmail_auth_expired' });
+    }
     // Check for insufficient permissions error from Google
     if (err && err.errors && Array.isArray(err.errors)) {
       const insufficient = err.errors.find((e: any) => e.reason === 'insufficientPermissions');
@@ -903,7 +911,11 @@ fastify.post('/api/gmail/response-time', async (request, reply) => {
     return reply.send({ average_response_time, reply_count: count });
   } catch (err: any) {
     fastify.log.error(err);
-    return reply.status(500).send({ error: 'Failed to fetch response time' });
+    // Check for authentication errors
+    if (err.status === 401 || err.code === 401 || err.message?.includes('Invalid Credentials')) {
+      return reply.status(401).send({ error: 'gmail_auth_expired' });
+    }
+    return reply.status(500).send({ error: err.message || 'Failed to fetch response time' });
   }
 });
 
