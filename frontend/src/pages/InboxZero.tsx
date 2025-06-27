@@ -2,15 +2,11 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/hooks/useAuth';
 import PageHeading from '@/components/PageHeading';
-
-// Helper to get weekday index with Monday as 0
-function getMondayStartWeekday(date: Date) {
-  const day = date.getDay();
-  return day === 0 ? 6 : day - 1;
-}
+import { useWorkingHours } from '@/hooks/useWorkingHours';
 
 export default function InboxZero() {
   const { user } = useAuth();
+  const { workingHours, loading: whLoading } = useWorkingHours();
   const [history, setHistory] = useState<{ date: string; inboxCount: number; isWorkingDay: boolean }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,58 +34,74 @@ export default function InboxZero() {
     fetchHistory();
   }, [user?.id]);
 
-  // Only count/display working days in the current month
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
-  const daysInMonth = now.getDate(); // up to today
+  // Get total days in the current month
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+  // Map for quick lookup (keyed by date string 'YYYY-MM-DD')
+  const historyMap = new Map(history.map((d) => [d.date, d]));
+
+  // Build a full month calendar matrix (weeks, Sun-Sat)
+  const weeks: Array<Array<any>> = [];
+  let week: Array<any> = [];
+  const firstDayDate = new Date(currentYear, currentMonth, 1);
+  let firstWeekday = firstDayDate.getDay(); // 0=Sun, 6=Sat
+  for (let i = 0; i < firstWeekday; i++) {
+    week.push(null);
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateObj = new Date(currentYear, currentMonth, day);
+    const dayOfWeek = dateObj.getDay(); // 0=Sun, 6=Sat
+    const key = dateObj.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+    const dayData = historyMap.get(key);
+    const isWorkingDay = workingHours?.days?.includes(dayOfWeek === 0 ? 7 : dayOfWeek) ?? false; // 1=Mon, 7=Sun
+    week.push({
+      day,
+      dayData,
+      isWorkingDay,
+      dateObj,
+    });
+    if (week.length === 7) {
+      weeks.push(week);
+      week = [];
+    }
+  }
+  if (week.length > 0) {
+    while (week.length < 7) {
+      week.push(null);
+    }
+    weeks.push(week);
+  }
+  // Flatten for grid rendering (headers: Sun-Sat)
+  const dayHeaders = ["S","M","T","W","T","F","S"];
+  // Define types for calendar grid
+  interface HeaderCell { type: 'header'; label: string; }
+  interface DayCell { type: 'day'; value: any; }
+  const calendarGrid: Array<HeaderCell | DayCell> = [
+    ...dayHeaders.map((d) => ({ type: 'header' as const, label: d })),
+    ...weeks.flat().map((d) => ({ type: 'day' as const, value: d })),
+  ];
+
+  // Count working days and inbox zero days
   const monthHistory = history.filter((d) => {
     const date = new Date(d.date);
     return (
       date.getFullYear() === currentYear &&
       date.getMonth() === currentMonth &&
-      d.isWorkingDay // Use working days from user settings
+      workingHours?.days?.includes(date.getDay() === 0 ? 7 : date.getDay())
     );
   });
   const inboxZeroDays = monthHistory.filter((d) => d.inboxCount === 0).length;
 
-  // Map for quick lookup
-  const historyMap = new Map(monthHistory.map((d) => [new Date(d.date).getDate(), d]));
-
-  // Build a working days calendar matrix (weeks)
-  const weeks: Array<Array<any>> = [];
-  let week: Array<any> = [];
-  const firstDayDate = new Date(currentYear, currentMonth, 1);
-  let firstWeekday = getMondayStartWeekday(firstDayDate);
-  for (let i = 0; i < firstWeekday; i++) {
-    week.push(null);
-  }
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dayData = historyMap.get(day);
-    if (dayData && dayData.isWorkingDay) { // Only show working days
-      const d = { day, ...dayData };
-      week.push(d);
-      if (week.length === 5) { // Only 5 working days per week
-        weeks.push(week);
-        week = [];
-      }
+  // Debug: log working days and current month/year
+  useEffect(() => {
+    if (workingHours) {
+      console.log('Working days (1=Mon, 7=Sun):', workingHours.days);
+      console.log('Current year:', currentYear, 'Current month:', currentMonth + 1);
     }
-  }
-  if (week.length > 0) {
-    while (week.length < 5) {
-      week.push(null);
-    }
-    weeks.push(week);
-  }
-  // Flatten for grid rendering (headers: M-F)
-  const workingDayHeaders = ["M","T","W","T","F"];
-  // Define types for calendar grid
-  interface HeaderCell { type: 'header'; label: string; }
-  interface DayCell { type: 'day'; value: any; }
-  const calendarGrid: Array<HeaderCell | DayCell> = [
-    ...workingDayHeaders.map((d) => ({ type: 'header' as const, label: d })),
-    ...weeks.flat().map((d) => ({ type: 'day' as const, value: d })),
-  ];
+  }, [workingHours, currentYear, currentMonth]);
 
   return (
     <div className="mx-auto max-w-2xl p-0 pt-0 mt-0">
@@ -100,13 +112,13 @@ export default function InboxZero() {
           <CardTitle>Inbox Zero Days: <span className="text-primary">{inboxZeroDays}</span> / {monthHistory.length}</CardTitle>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {loading || whLoading ? (
             <div className="text-center py-8">Loading...</div>
           ) : error ? (
             <div className="text-center text-red-500 py-8">{error}</div>
           ) : (
             <div className="flex justify-center items-center">
-              <div className="grid grid-cols-5 gap-2 mt-2 w-fit">
+              <div className="grid grid-cols-7 gap-2 mt-2 w-fit">
                 {calendarGrid.map((cell, i) =>
                   cell.type === 'header' ? (
                     <div
@@ -115,14 +127,20 @@ export default function InboxZero() {
                     >
                       {cell.label}
                     </div>
-                  ) : (
+                  ) : cell.value ? (
                     <div
                       key={i}
-                      className={`w-10 h-10 rounded flex items-center justify-center text-sm font-semibold border ${cell.value ? (cell.value.inboxCount === 0 ? 'bg-primary text-white border-primary' : 'bg-muted text-muted-foreground border-muted') : 'invisible'}`}
-                      title={cell.value ? `${currentYear}-${String(currentMonth+1).padStart(2,'0')}-${String(cell.value.day).padStart(2,'0')}: ${cell.value.inboxCount === 0 ? 'Inbox Zero!' : (cell.value.inboxCount !== undefined ? cell.value.inboxCount + ' in inbox' : '')}` : ''}
+                      className={`w-10 h-10 rounded flex items-center justify-center text-sm font-semibold border ${cell.value.isWorkingDay ? (cell.value.dayData && cell.value.dayData.inboxCount === 0 ? 'bg-primary text-white border-primary' : 'bg-muted text-muted-foreground border-muted') : 'bg-gray-100 text-gray-400 border-gray-200'}`}
+                      title={cell.value.isWorkingDay
+                        ? cell.value.dayData
+                          ? `${currentYear}-${String(currentMonth+1).padStart(2,'0')}-${String(cell.value.day).padStart(2,'0')}: ${cell.value.dayData.inboxCount === 0 ? 'Inbox Zero!' : (cell.value.dayData.inboxCount !== undefined ? cell.value.dayData.inboxCount + ' in inbox' : '')}`
+                          : `${currentYear}-${String(currentMonth+1).padStart(2,'0')}-${String(cell.value.day).padStart(2,'0')}: No data`
+                        : 'Not a working day'}
                     >
-                      {cell.value ? cell.value.day : ''}
+                      {cell.value.day}
                     </div>
+                  ) : (
+                    <div key={i} className="w-10 h-10" />
                   )
                 )}
               </div>
@@ -132,4 +150,4 @@ export default function InboxZero() {
       </Card>
     </div>
   );
-} 
+}
