@@ -41,7 +41,13 @@ export function useAuth() {
   const signup = useCallback(async (email: string, password: string) => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ 
+      email, 
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/settings/profile`
+      }
+    });
     if (error) setError(error.message);
     if (data.user && !data.session) setShowConfirmMessage(true);
     setLoading(false);
