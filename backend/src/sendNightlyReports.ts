@@ -46,7 +46,6 @@ interface SentEmail {
   to_email: string;
   to_name: string;
   subject: string;
-  body: string;
   is_reply: boolean;
 }
 
@@ -118,7 +117,7 @@ async function main() {
       // Get all emails for the user from yesterday (user's local time)
       const { data: emails, error: emailsError } = await supabase
         .from('sent_emails')
-        .select('email_id, user_id, sent_at, to_email, to_name, subject, body, is_reply')
+        .select('email_id, user_id, sent_at, to_email, to_name, subject, is_reply')
         .eq('user_id', user.user_id)
         .gte('sent_at', `${yesterdayDateStr}T00:00:00`)
         .lt('sent_at', `${todayDateStr}T00:00:00`)

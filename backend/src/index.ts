@@ -1649,7 +1649,6 @@ fastify.post('/api/gmail/send', async (request, reply) => {
       to_name,
       subject,
       sent_at: new Date().toISOString(),
-      body,
       is_reply: subject.startsWith('Re:') || !!inReplyTo, // Set is_reply based on subject prefix or inReplyTo header
       gmail_message_id: gmailMessageId,
       in_reply_to: inReplyTo || null, // Save the In-Reply-To header value
