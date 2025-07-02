@@ -58,7 +58,7 @@ export type RealTimeReportEmailProps = {
   sentEmailsWithViews?: Array<{ name: string; email: string; subject: string; views: number; isReply: boolean }>;
 };
 
-const baseUrl = "https://email-kpi.vercel.app";
+const baseUrl = "https://app.10xinbox.com";
 
 // Consistent styling constants
 const styles = {
@@ -422,7 +422,7 @@ export default function RealTimeReportEmail({
               Sent by <strong style={{ color: "#1a1a1a" }}>Email KPI App</strong>
             </Text>
             <Button
-              href="https://email-kpi.vercel.app"
+              href={baseUrl}
               style={styles.button}
             >
               View Full Dashboard
