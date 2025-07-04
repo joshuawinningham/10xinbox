@@ -35,8 +35,13 @@ function Layout({ children }: { children: React.ReactNode }) {
       <div className={`${sidebarOpen ? 'w-64' : 'w-0'} border-r bg-card flex flex-col transition-all duration-300 overflow-hidden`}>
         <div className="p-6">
           <div className="flex items-center gap-2 mb-8">
-            <LayoutDashboard className="h-8 w-8" />
-            <span className="font-bold text-xl">MailDash</span>
+            <div className="bg-green-600 p-2 rounded-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-mail h-6 w-6 text-white">
+                <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+              </svg>
+            </div>
+            <span className="font-bold text-xl">10XInbox</span>
           </div>
           
           <nav className="space-y-2">
@@ -125,7 +130,7 @@ function Layout({ children }: { children: React.ReactNode }) {
                 <PanelLeft className="h-6 w-6" />
               )}
             </Button>
-            <h2 className="text-lg font-semibold">MailDash</h2>
+            <h2 className="text-lg font-semibold">10XInbox</h2>
           </div>
         </div>
 
