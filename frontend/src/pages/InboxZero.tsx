@@ -53,10 +53,10 @@ export default function InboxZero() {
   }
   for (let day = 1; day <= daysInMonth; day++) {
     const dateObj = new Date(currentYear, currentMonth, day);
-    const dayOfWeek = dateObj.getDay(); // 0=Sun, 6=Sat
+    // const dayOfWeek = dateObj.getDay(); // 0=Sun, 6=Sat (not needed since we use API's isWorkingDay)
     const key = dateObj.toISOString().slice(0, 10); // 'YYYY-MM-DD'
     const dayData = historyMap.get(key);
-    const isWorkingDay = workingHours?.days?.includes(dayOfWeek === 0 ? 7 : dayOfWeek) ?? false; // 1=Mon, 7=Sun
+    const isWorkingDay = dayData?.isWorkingDay ?? false; // Use API's isWorkingDay field
     week.push({
       day,
       dayData,
@@ -84,13 +84,14 @@ export default function InboxZero() {
     ...weeks.flat().map((d) => ({ type: 'day' as const, value: d })),
   ];
 
-  // Count working days and inbox zero days
+  // Count working days and inbox zero days (use same logic as Dashboard)
   const monthHistory = history.filter((d) => {
-    const date = new Date(d.date);
+    // Use string manipulation to avoid timezone issues (same as Dashboard)
+    const [year, month] = d.date.split('-').map(Number);
     return (
-      date.getFullYear() === currentYear &&
-      date.getMonth() === currentMonth &&
-      workingHours?.days?.includes(date.getDay() === 0 ? 7 : date.getDay())
+      year === currentYear &&
+      (month - 1) === currentMonth && // month-1 because JS months are 0-indexed
+      d.isWorkingDay // Use working days from user settings (same as Dashboard)
     );
   });
   const inboxZeroDays = monthHistory.filter((d) => d.inboxCount === 0).length;

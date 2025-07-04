@@ -123,10 +123,11 @@ export default function Dashboard() {
         const currentMonth = now.getMonth();
         const daysThisMonth = Array.isArray(data)
           ? data.filter((d: any) => {
-              const date = new Date(d.date);
+              // Use string manipulation to avoid timezone issues
+              const [year, month] = d.date.split('-').map(Number);
+              const isCurrentMonth = year === currentYear && (month - 1) === currentMonth; // month-1 because JS months are 0-indexed
               return (
-                date.getFullYear() === currentYear &&
-                date.getMonth() === currentMonth &&
+                isCurrentMonth &&
                 d.isWorkingDay // Use working days from user settings
               );
             })
@@ -160,10 +161,11 @@ export default function Dashboard() {
         // Sort by date ascending
         const monthData = Array.isArray(data)
           ? data.filter((d: any) => {
-              const date = new Date(d.date);
+              // Use string manipulation to avoid timezone issues
+              const [year, month] = d.date.split('-').map(Number);
               return (
-                date.getFullYear() === currentYear &&
-                date.getMonth() === currentMonth &&
+                year === currentYear &&
+                (month - 1) === currentMonth && // month-1 because JS months are 0-indexed
                 d.isWorkingDay // Use working days from user settings
               );
             }).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())

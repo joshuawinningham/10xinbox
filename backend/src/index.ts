@@ -360,14 +360,26 @@ fastify.post('/api/report/send', async (request, reply) => {
 
     // If no stats, trigger a real-time fetch for today
     if (statsError || !stats) {
+      console.log('Making internal fetch-stats call...');
       const fetchRes = await fastify.inject({
         method: 'POST',
         url: '/api/gmail/fetch-stats',
         payload: { user_id, time_zone: tz, day: 'today' },
       });
-      const fetchData = fetchRes.json();
+      console.log('Fetch-stats response status:', fetchRes.statusCode);
+      console.log('Fetch-stats response body:', fetchRes.body);
+      
       if (!fetchRes.statusCode || fetchRes.statusCode >= 400) {
-        return reply.status(404).send({ error: 'No stats found for today and failed to fetch.' });
+        return reply.status(404).send({ error: `No stats found for today and failed to fetch. Status: ${fetchRes.statusCode}, Body: ${fetchRes.body}` });
+      }
+      
+      let fetchData;
+      try {
+        fetchData = fetchRes.json();
+      } catch (parseError) {
+        console.log('JSON parse error:', parseError);
+        console.log('Response body that failed to parse:', fetchRes.body);
+        return reply.status(500).send({ error: `Failed to parse internal API response: ${parseError}` });
       }
       // Try to fetch again from DB
       ({ data: stats } = await supabase
