@@ -1,10 +1,10 @@
 # Gemini Project Configuration
 
-This file provides instructions to Gemini to customize its behavior for the `email-kpi` project.
+This file provides instructions to Gemini to customize its behavior for the `10xinbox` project.
 
 ## Project Overview
 
-The `email-kpi` project is a full-stack application designed to track and analyze email-based Key Performance Indicators (KPIs). It consists of a React frontend and a Node.js (TypeScript) backend.
+The `10xinbox` project is a full-stack application designed to track and analyze email-based Key Performance Indicators (KPIs). It consists of a React frontend and a Node.js (TypeScript) backend.
 
 - **Frontend:** The frontend is a Vite-powered React application using TypeScript, Tailwind CSS, and various UI components from `radix-ui` and `shadcn/ui`. It interacts with the backend to display email statistics and user settings.
 - **Backend:** The backend is a Fastify server written in TypeScript. It connects to the Gmail API to fetch email data, stores metrics in a Supabase (PostgreSQL) database, and serves the data to the frontend.

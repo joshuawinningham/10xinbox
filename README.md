@@ -1,6 +1,6 @@
-# Email KPI
+# 10XInbox
 
-**Email KPI** is a full-stack web application for tracking and visualizing your email productivity. Connect your Gmail account to view detailed analytics, including emails sent/received, response times, top senders, and your progress toward Inbox Zero.
+**10XInbox** is a full-stack web application for tracking and visualizing your email productivity. Connect your Gmail account to view detailed analytics, including emails sent/received, response times, top senders, and your progress toward Inbox Zero.
 
 ---
 
@@ -30,7 +30,7 @@
 ## Directory Structure
 
 ```
-email-kpi/
+10xinbox/
   backend/         # Fastify API, Gmail integration, email processing
     src/
     emails/
@@ -53,7 +53,7 @@ email-kpi/
 ### 1. Clone the repository
 ```bash
 git clone <your-repo-url>
-cd email-kpi
+cd 10xinbox
 ```
 
 ### 2. Install dependencies

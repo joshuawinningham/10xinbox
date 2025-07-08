@@ -73,7 +73,7 @@ fastify.get('/health', async (request, reply) => {
 
 // Root endpoint for Render health checks
 fastify.get('/', async (request, reply) => {
-  return { status: 'ok', message: 'Email KPI Backend API' };
+  return { status: 'ok', message: '10XInbox Backend API' };
 });
 
 // Endpoint to start OAuth flow
@@ -558,7 +558,7 @@ fastify.post('/api/report/send', async (request, reply) => {
     console.log('sentEmailsWithViews:', sentEmailsWithViews);
     await sendEmail({
       to: toEmail,
-      subject: `Your Real-Time Email KPI Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
+      subject: `Your Real-Time 10XInbox Report for ${DateTime.fromISO(dateStr || '').toFormat('MM-dd-yyyy')}`,
       react: RealTimeReportEmail({
         date: dateStr || '',
         newThreads,

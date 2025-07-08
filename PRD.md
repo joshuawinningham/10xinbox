@@ -1,9 +1,9 @@
 # Product Requirements Document (PRD)
-# Email KPI - Email Analytics & Productivity Platform
+# 10XInbox - Email Analytics & Productivity Platform
 
 ## Executive Summary
 
-Email KPI is a comprehensive email analytics and productivity platform that integrates with Gmail to provide users with actionable insights into their email habits, response times, and inbox management. The platform helps professionals achieve Inbox Zero, track email productivity metrics, and maintain better email hygiene through automated reports and real-time analytics.
+10XInbox is a comprehensive email analytics and productivity platform that integrates with Gmail to provide users with actionable insights into their email habits, response times, and inbox management. The platform helps professionals achieve Inbox Zero, track email productivity metrics, and maintain better email hygiene through automated reports and real-time analytics.
 
 ## Product Overview
 

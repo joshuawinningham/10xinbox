@@ -1,4 +1,4 @@
-// Script for Render Cron Job: Send nightly email KPI reports to all users
+// Script for Render Cron Job: Send nightly 10XInbox reports to all users
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 

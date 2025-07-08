@@ -223,7 +223,7 @@ export default function DailyReportEmail({
           <Section style={styles.header}>
             <Img src={`${baseUrl}/logo.png`} width={64} height={64} alt="Logo" style={{ margin: "0 auto 16px" }} />
             <Text style={styles.title}>
-              Your Daily Email KPI Report
+              Your Daily 10XInbox Report
             </Text>
             <Text style={styles.subtitle}>
               {formatDate(date)}
@@ -417,7 +417,7 @@ export default function DailyReportEmail({
           {/* Footer */}
           <Section style={styles.footer}>
             <Text style={styles.footerText}>
-              Sent by <strong style={{ color: "#1a1a1a" }}>Email KPI App</strong>
+              Sent by <strong style={{ color: "#1a1a1a" }}>10XInbox</strong>
             </Text>
             <Button
               href={baseUrl}
