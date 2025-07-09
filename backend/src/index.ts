@@ -1067,6 +1067,19 @@ fastify.post('/api/gmail/inbox-zero-history', async (request, reply) => {
       }
       
       const isWorking = isWorkingDay(day);
+
+      // Exclude today if it's a working day and the working day is not finished
+      if (i === 0 && isWorking) {
+        // Calculate the buffer cutoff time for today
+        const bufferMinutes = workingHours?.inbox_zero_buffer_minutes || 30;
+        const workingHoursEnd = workingHours?.working_hours_end || '17:00:00';
+        const [endHour, endMinute] = workingHoursEnd.split(':').map(Number);
+        const bufferCutoff = day.set({ hour: endHour, minute: endMinute }).minus({ minutes: bufferMinutes });
+        // If now is before the buffer cutoff, skip today
+        if (now < bufferCutoff) {
+          continue;
+        }
+      }
       
       if (existingDates.has(dateStr)) {
         // Use data from database
